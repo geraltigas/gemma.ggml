@@ -1,0 +1,328 @@
+//
+// Created by geraltigas on 2/25/24.
+//
+
+#include "gemma_model.h"
+
+#include <sstream>
+#include <stdexcept>
+
+struct LLM_TN {
+    LLM_TN() {
+    }
+
+    llm_arch arch = LLM_ARCH_GEMMA;
+
+    std::string operator()(llm_tensor tensor) const {
+        if (LLM_TENSOR_NAMES[arch].find(tensor) == LLM_TENSOR_NAMES[arch].end()) {
+            return "__missing__";
+        }
+        return LLM_TENSOR_NAMES[arch].at(tensor);
+    }
+
+    std::string operator()(llm_tensor tensor, const std::string &suffix) const {
+        if (LLM_TENSOR_NAMES[arch].find(tensor) == LLM_TENSOR_NAMES[arch].end()) {
+            return "__missing__";
+        }
+        return LLM_TENSOR_NAMES[arch].at(tensor) + "." + suffix;
+    }
+
+    std::string operator()(llm_tensor tensor, int bid) const {
+        if (LLM_TENSOR_NAMES[arch].find(tensor) == LLM_TENSOR_NAMES[arch].end()) {
+            return "__missing__";
+        }
+        // return ::format(LLM_TENSOR_NAMES[arch].at(tensor).c_str(), bid); // format is not defined
+        return LLM_TENSOR_NAMES[arch].at(tensor) + "." + std::to_string(bid);
+    }
+
+    std::string operator()(llm_tensor tensor, const std::string &suffix, int bid) const {
+        if (LLM_TENSOR_NAMES[arch].find(tensor) == LLM_TENSOR_NAMES[arch].end()) {
+            return "__missing__";
+        }
+        // return ::format(LLM_TENSOR_NAMES[arch].at(tensor).c_str(), bid) + "." + suffix;
+        return LLM_TENSOR_NAMES[arch].at(tensor) + "." + std::to_string(bid) + "." + suffix;
+    }
+
+    std::string operator()(llm_tensor tensor, const std::string &suffix, int bid, int xid) const {
+        if (LLM_TENSOR_NAMES[arch].find(tensor) == LLM_TENSOR_NAMES[arch].end()) {
+            return "__missing__";
+        }
+        // return ::format(LLM_TENSOR_NAMES[arch].at(tensor).c_str(), bid, xid) + "." + suffix;
+        return LLM_TENSOR_NAMES[arch].at(tensor) + "." + std::to_string(bid) + "." + std::to_string(xid) + "." + suffix;
+    }
+};
+
+static void replace_all(std::string &s, const std::string &search, const std::string &replace) {
+    std::string result;
+    for (size_t pos = 0; ; pos += search.length()) {
+        auto new_pos = s.find(search, pos);
+        if (new_pos == std::string::npos) {
+            result += s.substr(pos, s.size() - pos);
+            break;
+        }
+        result += s.substr(pos, new_pos - pos) + replace;
+        pos = new_pos;
+    }
+    s = std::move(result);
+}
+
+static std::string gguf_data_to_str(enum gguf_type type, const void *data, int i) {
+    switch (type) {
+        case GGUF_TYPE_UINT8: return std::to_string(((const uint8_t *) data)[i]);
+        case GGUF_TYPE_INT8: return std::to_string(((const int8_t *) data)[i]);
+        case GGUF_TYPE_UINT16: return std::to_string(((const uint16_t *) data)[i]);
+        case GGUF_TYPE_INT16: return std::to_string(((const int16_t *) data)[i]);
+        case GGUF_TYPE_UINT32: return std::to_string(((const uint32_t *) data)[i]);
+        case GGUF_TYPE_INT32: return std::to_string(((const int32_t *) data)[i]);
+        case GGUF_TYPE_UINT64: return std::to_string(((const uint64_t *) data)[i]);
+        case GGUF_TYPE_INT64: return std::to_string(((const int64_t *) data)[i]);
+        case GGUF_TYPE_FLOAT32: return std::to_string(((const float *) data)[i]);
+        case GGUF_TYPE_FLOAT64: return std::to_string(((const double *) data)[i]);
+        case GGUF_TYPE_BOOL: return ((const bool *) data)[i] ? "true" : "false";
+        default: return "unknown type: " + std::to_string(type);
+    }
+}
+
+static std::string gguf_kv_to_str(const struct gguf_context *ctx_gguf, int i) {
+    const enum gguf_type type = gguf_get_kv_type(ctx_gguf, i);
+
+    switch (type) {
+        case GGUF_TYPE_STRING:
+            return gguf_get_val_str(ctx_gguf, i);
+        case GGUF_TYPE_ARRAY: {
+            const enum gguf_type arr_type = gguf_get_arr_type(ctx_gguf, i);
+            int arr_n = gguf_get_arr_n(ctx_gguf, i);
+            const void *data = gguf_get_arr_data(ctx_gguf, i);
+            std::stringstream ss;
+            ss << "[";
+            for (int j = 0; j < arr_n; j++) {
+                if (arr_type == GGUF_TYPE_STRING) {
+                    std::string val = gguf_get_arr_str(ctx_gguf, i, j);
+                    // escape quotes
+                    replace_all(val, "\\", "\\\\");
+                    replace_all(val, "\"", "\\\"");
+                    ss << '"' << val << '"';
+                } else if (arr_type == GGUF_TYPE_ARRAY) {
+                    ss << "???";
+                } else {
+                    ss << gguf_data_to_str(arr_type, data, j);
+                }
+                if (j < arr_n - 1) {
+                    ss << ", ";
+                }
+            }
+            ss << "]";
+            return ss.str();
+        }
+        default:
+            return gguf_data_to_str(type, gguf_get_val_data(ctx_gguf, i), 0);
+    }
+}
+
+
+
+
+void GemmaModel::llm_load_hparams() {
+    ctx_gguf = gguf_init_from_file(gguf_file_path, {
+                                       /*.no_alloc = */ true,
+                                       /*.ctx      = */ &ctx,
+                                   });
+    const gguf_context *ctx = ctx_gguf;
+
+    // get metadata as string
+    for (int i = 0; i < gguf_get_n_kv(ctx); i++) {
+        enum gguf_type type = gguf_get_kv_type(ctx, i);
+        if (type == GGUF_TYPE_ARRAY) {
+            continue;
+        }
+        const char *name = gguf_get_key(ctx, i);
+        const std::string value = gguf_kv_to_str(ctx, i);
+        gguf_kv.emplace(name, value);
+    }
+
+    // get general kv
+    get_key(LLM_KV_GENERAL_NAME, name, false);
+
+    // get hparams kv
+    get_arr_n(LLM_KV_TOKENIZER_LIST, hparams.n_vocab);
+    get_key(LLM_KV_CONTEXT_LENGTH, hparams.n_ctx_train);
+    get_key(LLM_KV_EMBEDDING_LENGTH, hparams.n_embd);
+    get_key(LLM_KV_FEED_FORWARD_LENGTH, hparams.n_ff);
+    get_key(LLM_KV_ATTENTION_HEAD_COUNT, hparams.n_head);
+    get_key(LLM_KV_BLOCK_COUNT, hparams.n_layer);
+    get_key(LLM_KV_EXPERT_COUNT, hparams.n_expert, false);
+    get_key(LLM_KV_EXPERT_USED_COUNT, hparams.n_expert_used, false);
+
+    GGML_ASSERT(hparams.n_expert <= LLAMA_MAX_EXPERTS);
+    GGML_ASSERT(hparams.n_expert_used <= hparams.n_expert);
+    if (hparams.n_expert > 0) {
+        GGML_ASSERT(hparams.n_expert_used > 0);
+    } else {
+        GGML_ASSERT(hparams.n_expert_used == 0);
+    }
+
+    // n_head_kv is optional, default to n_head
+    hparams.n_head_kv = hparams.n_head;
+    get_key(LLM_KV_ATTENTION_HEAD_COUNT_KV, hparams.n_head_kv, false);
+
+    bool rope_finetuned = false;
+    get_key(LLM_KV_ROPE_SCALING_FINETUNED, rope_finetuned, false);
+    hparams.rope_finetuned = rope_finetuned;
+
+    hparams.n_yarn_orig_ctx = hparams.n_ctx_train;
+    get_key(LLM_KV_ROPE_SCALING_ORIG_CTX_LEN, hparams.n_yarn_orig_ctx, false);
+
+    // rope_freq_base (optional)
+    hparams.rope_freq_base_train = 10000.0f;
+    get_key(LLM_KV_ROPE_FREQ_BASE, hparams.rope_freq_base_train, false);
+
+    std::string rope_scaling("linear");
+    get_key(LLM_KV_ROPE_SCALING_TYPE, rope_scaling, false);
+    hparams.rope_scaling_type_train = llama_rope_scaling_type_from_string(rope_scaling);
+    GGML_ASSERT(hparams.rope_scaling_type_train != LLAMA_ROPE_SCALING_UNSPECIFIED);
+
+    // rope_freq_scale (inverse of the kv) is optional
+    float ropescale = 0.0f;
+    if (!get_key(LLM_KV_ROPE_SCALING_FACTOR, ropescale, false)) {
+        // try the old key name
+        get_key(LLM_KV_ROPE_SCALE_LINEAR, ropescale, false);
+    }
+    hparams.rope_freq_scale_train = ropescale == 0.0f ? 1.0f : 1.0f / ropescale;
+
+    // sanity check for n_rot (optional)
+    {
+        hparams.n_rot = hparams.n_embd / hparams.n_head;
+
+        get_key(LLM_KV_ROPE_DIMENSION_COUNT, hparams.n_rot, false);
+    }
+
+    hparams.n_embd_head_k = hparams.n_embd / hparams.n_head;
+    get_key(LLM_KV_ATTENTION_KEY_LENGTH, hparams.n_embd_head_k, false);
+
+    hparams.n_embd_head_v = hparams.n_embd / hparams.n_head;
+    get_key(LLM_KV_ATTENTION_VALUE_LENGTH, hparams.n_embd_head_v, false);
+
+    // arch-specific KVs
+    {
+        get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
+
+        switch (hparams.n_layer) {
+            case 18: model_type = e_model::MODEL_2B;
+                break;
+            case 28: model_type = e_model::MODEL_7B;
+                break;
+            default: model_type = e_model::MODEL_UNKNOWN;
+        }
+    }
+
+
+    // ftype = ftype; // TODO: get ftype from gguf
+
+    if (hparams.f_max_alibi_bias > 0.0f) {
+        hparams.need_kq_pos = true;
+    }
+}
+
+
+int GemmaModel::load(const char *gguf_file_path) {
+    llm_load_hparams();
+    const int64_t n_embd = hparams.n_embd;
+    const int64_t n_vocab      = hparams.n_vocab;
+    const int64_t n_layer     = hparams.n_layer;
+    const auto tn = LLM_TN();
+    tok_embd = create_tensor(ctx, tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab});
+
+    // output
+    output_norm = create_tensor(ctx, tn(LLM_TENSOR_OUTPUT_NORM, "weight"), {n_embd});
+    output = create_tensor(ctx, tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab});
+    // same as tok_embd, duplicated to allow offloading
+    n_created--; // artificial tensor
+    size_data += ggml_nbytes(output);
+
+    const int64_t n_ff = hparams.n_ff;
+    const int64_t n_embd_head_k = hparams.n_embd_head_k;
+    const int64_t n_embd_k_gqa = hparams.n_embd_k_gqa();
+    const int64_t n_embd_v_gqa = hparams.n_embd_v_gqa();
+
+    for (uint32_t i = 0; i < n_layer; ++i) {
+        ggml_context *ctx_layer = ctx;
+        ggml_context *ctx_split = ctx;
+
+        auto &layer = layers[i];
+
+        layer.attn_norm = create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_NORM, "weight", i), {n_embd});
+
+        layer.wq = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_Q, "weight", i),
+                                    {n_embd, n_embd_head_k * hparams.n_head});
+        layer.wk = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_K, "weight", i), {n_embd, n_embd_k_gqa});
+        layer.wv = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_V, "weight", i), {n_embd, n_embd_v_gqa});
+        layer.wo = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_OUT, "weight", i),
+                                    {n_embd_head_k * hparams.n_head, n_embd});
+
+        layer.ffn_norm = create_tensor(ctx_layer, tn(LLM_TENSOR_FFN_NORM, "weight", i), {n_embd});
+        layer.ffn_gate = create_tensor(ctx_split, tn(LLM_TENSOR_FFN_GATE, "weight", i), {n_embd, n_ff});
+        layer.ffn_up = create_tensor(ctx_split, tn(LLM_TENSOR_FFN_UP, "weight", i), {n_embd, n_ff});
+        layer.ffn_down = create_tensor(ctx_split, tn(LLM_TENSOR_FFN_DOWN, "weight", i), {n_ff, n_embd});
+    }
+
+    return 0;
+}
+
+ggml_tensor *GemmaModel::create_tensor(ggml_context *ctx, const std::string &name, const std::vector<int64_t> &ne,
+                                       bool required) {
+    struct ggml_tensor *cur = ggml_get_tensor(ctx, name.c_str());
+
+    if (cur == NULL) {
+        if (!required) {
+            return NULL;
+        }
+        // format("%s: tensor '%s' not found", __func__, name.c_str()), use std lib
+        throw std::runtime_error(std::string(__func__) + ": tensor '" + name + "' not found");
+    } {
+        bool is_ok = true;
+        for (size_t i = 0; i < ne.size(); ++i) {
+            if (ne[i] != cur->ne[i]) {
+                is_ok = false;
+                break;
+            }
+        }
+        if (!is_ok) {
+            // format("%s: tensor '%s' has wrong shape; expected %s, got %s",
+            // __func__, name.c_str(),
+            //         llama_format_tensor_shape(ne).c_str(),
+            //         llama_format_tensor_shape(cur).c_str()
+            // )
+            throw std::runtime_error(std::string(__func__) + ": tensor '" + name + "' has wrong shape; expected " +
+                                     llama_format_tensor_shape(ne) + ", got " + llama_format_tensor_shape(cur));
+        }
+    }
+
+    return create_tensor_for(ctx, cur);
+}
+
+std::string GemmaModel::llama_format_tensor_shape(const std::vector<int64_t> &ne) {
+    char buf[256];
+    snprintf(buf, sizeof(buf), "%5" PRId64, ne.at(0));
+    for (size_t i = 1; i < ne.size(); i++) {
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), ", %5" PRId64, ne.at(i));
+    }
+    return buf;
+}
+
+std::string GemmaModel::llama_format_tensor_shape(const ggml_tensor *t) {
+    char buf[256];
+    snprintf(buf, sizeof(buf), "%5" PRId64, t->ne[0]);
+    for (int i = 1; i < GGML_MAX_DIMS; i++) {
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), ", %5" PRId64, t->ne[i]);
+    }
+    return buf;
+}
+
+ggml_tensor *GemmaModel::create_tensor_for(ggml_context *ctx, ggml_tensor *meta) {
+    struct ggml_tensor *tensor = ggml_dup_tensor(ctx, meta);
+    ggml_set_name(tensor, ggml_get_name(meta));
+
+    n_created++;
+
+    return tensor;
+}
