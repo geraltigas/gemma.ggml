@@ -5,7 +5,6 @@
 #include "gemma_model.h"
 #include "macro.h"
 
-#include <ggml_addon.h>
 #include <map>
 #include <glog/logging.h>
 
@@ -89,7 +88,7 @@ int GemmaModel::load_model_from_file(const char *file_path) {
     }
 
     LOG(INFO) << kv_index.size() << " kv pairs loaded";
-    
+
     return 0;
 }
 
