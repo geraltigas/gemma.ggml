@@ -8,7 +8,6 @@
 #include <ggml_addon.h>
 #include <map>
 #include <glog/logging.h>
-#include <type.h>
 
 int GemmaModel::load_model_from_file(const char *file_path) {
     if (file_path == nullptr) {
@@ -16,74 +15,86 @@ int GemmaModel::load_model_from_file(const char *file_path) {
     }
 
     gguf_ctx = gguf_init_from_file(file_path, {
-                                       .no_alloc = false,
-                                       .ctx = &ggml_ctx
-                                   });
+            .no_alloc = false,
+            .ctx = &ggml_ctx
+    });
 
     n_kv = gguf_get_n_kv(gguf_ctx);
     n_tensors = gguf_get_n_tensors(gguf_ctx);
 
     for (int i = 0; i < n_tensors; i++) {
-        const char * name = gguf_get_tensor_name(gguf_ctx, i);
-        // if (i < 9) {
-//        LOG(INFO) << "Loading tensor: " << name;
-        // }else if (i == 9) {
-        //     LOG(INFO) << "Loading tensors: .........";
-        // }
-        ggml_tensor * t = ggml_get_tensor(ggml_ctx, name);
+        const char *name = gguf_get_tensor_name(gguf_ctx, i);
+        MASK(
+                LOG(INFO) << "Loading tensor: " << name;
+        )
+        ggml_tensor *t = ggml_get_tensor(ggml_ctx, name);
         tensors[name] = t;
-//        n_elements += ggml_nelements(t);
-//        n_bytes    += ggml_nbytes(t);
         ggml_type type = gguf_get_tensor_type(gguf_ctx, i);
         tensor_types[name] = type;
         n_type[type]++;
     }
 
     LOG(INFO) << tensors.size() << " tensors loaded";
-//    {
-//        const int kid = gguf_find_key(gguf_ctx, "general.file_type");
-//        if (kid >= 0) {
-//            ftype = static_cast<ggml_type>(gguf_get_val_u32(gguf_ctx, kid));
-//        }
-//    }
+
     std::map<gguf_type, int> type_count;
 
     for (int i = 0; i < n_kv; i++) {
-        const char * name           = gguf_get_key(gguf_ctx, i);
-        const enum gguf_type type   = gguf_get_kv_type(gguf_ctx, i);
-        kv_types[name]              = type;
-        kv_index[name]              = i;
+        const char *name = gguf_get_key(gguf_ctx, i);
+        const enum gguf_type type = gguf_get_kv_type(gguf_ctx, i);
+        kv_types[name] = type;
+        kv_index[name] = i;
         type_count[type]++;
-        const std::string type_name =
-            type == GGUF_TYPE_ARRAY
-            // ? format("%s[%s,%d]", gguf_type_name(type), gguf_type_name(gguf_get_arr_type(ctx_gguf, i)), gguf_get_arr_n(ctx_gguf, i))
-            // use std lib
-        ? std::string(gguf_type_name(type)) + "[" + gguf_type_name(gguf_get_arr_type(gguf_ctx, i)) + "," + std::to_string(gguf_get_arr_n(gguf_ctx, i)) + "]"
-        : gguf_type_name(type);
+        MASK(
+                switch (type) {
+                    case GGUF_TYPE_UINT32:
+                        LOG(INFO) << name << " - kv " << i << " " << gguf_type_name(type) << " = "
+                                  << get_u32_from_kv(name);
+                        break;
+                    case GGUF_TYPE_FLOAT32:
+                        LOG(INFO) << name << " - kv " << i << " " << gguf_type_name(type) << " = "
+                                  << get_f32_from_kv(name);
+                        break;
+                    case GGUF_TYPE_STRING:
+                        LOG(INFO) << name << " - kv " << i << " " << gguf_type_name(type) << " = "
+                                  << get_str_from_kv(name);
+                        break;
+                    case GGUF_TYPE_ARRAY:
+                        switch (get_arr_elem_type(name)) {
+                            case GGUF_TYPE_STRING:
+                                LOG(INFO) << name << " - kv " << i << " " << gguf_type_name(type) << "["
+                                          << gguf_type_name(get_arr_elem_type(name)) << "] = "
+                                          << get_str_arr_from_kv(name).size();
+                                break;
+                            case GGUF_TYPE_FLOAT32:
+                                LOG(INFO) << name << " - kv " << i << " " << gguf_type_name(type) << "["
+                                          << gguf_type_name(get_arr_elem_type(name)) << "] = "
+                                          << get_f32_array_from_kv(name).size();
+                                break;
+                            case GGUF_TYPE_INT32:
+                                LOG(INFO) << name << " - kv " << i << " " << gguf_type_name(type) << "["
+                                          << gguf_type_name(get_arr_elem_type(name)) << "] = "
+                                          << get_i32_array_from_kv(name).size();
+                                break;
+                            default:
+                                LOG(ERROR) << "Unknown array type";
+                                CHECK_RT(-1);
+                        }
+                        break;
+                    default:
+                        LOG(ERROR) << "Unknown type";
+                        CHECK_RT(-1);
+                }
+        )
 
-        std::string value          = gguf_kv_to_str(gguf_ctx, i);
-        if (constexpr size_t MAX_VALUE_LEN = 40; value.size() > MAX_VALUE_LEN) {
-            // value = format("%s...", value.substr(0, MAX_VALUE_LEN - 3).c_str());
-            // use std lib
-            value = value.substr(0, MAX_VALUE_LEN - 3) + "...";
-        }
-        replace_all(value, "\n", "\\n");
-         LOG(INFO) << name << " - kv " << i << " " << type_name << " = " << value;
     }
 
-    for (auto &kv : type_count) {
-        LOG(INFO) << "Type: " << gguf_type_name(kv.first) << " count: " << kv.second;
-    }
-
-    // for (auto &kv : n_type) {
-    //     LOG(INFO) << "Type: " << ggml_type_name(kv.first) << " count: " << kv.second;
-    // }
-
+    LOG(INFO) << kv_index.size() << " kv pairs loaded";
+    
     return 0;
 }
 
 u32 GemmaModel::get_u32_from_kv(const char *key) {
-    static std::map<std::string, u32> cache;
+    static std::map<str, u32> cache;
     if (cache.find(key) != cache.end()) {
         return cache[key];
     } else {
@@ -94,40 +105,40 @@ u32 GemmaModel::get_u32_from_kv(const char *key) {
 }
 
 f32 GemmaModel::get_f32_from_kv(const char *key) {
-    static std::map<std::string, float> cache;
+    static std::map<str, float> cache;
     if (cache.find(key) != cache.end()) {
         return cache[key];
-    }else {
+    } else {
         float temp = gguf_get_val_f32(gguf_ctx, kv_index[key]);
         cache[key] = temp;
         return temp;
     }
 }
 
-std::string GemmaModel::get_str_from_kv(const char *key) {
-    static std::map<std::string, std::string> cache;
+str GemmaModel::get_str_from_kv(const char *key) {
+    static std::map<str, str> cache;
     if (cache.find(key) != cache.end()) {
         return cache[key];
-    }else {
-        std::string temp = gguf_get_val_str(gguf_ctx, kv_index[key]);
+    } else {
+        str temp = gguf_get_val_str(gguf_ctx, kv_index[key]);
         cache[key] = temp;
         return temp;
     }
 }
 
-std::vector<std::string> GemmaModel::get_str_arr_from_kv(const char *key) {
-    static std::map<std::string, std::vector<std::string>> cache;
+std::vector<str> GemmaModel::get_str_arr_from_kv(const char *key) {
+    static std::map<str, std::vector<str>> cache;
     if (cache.find(key) != cache.end()) {
         return cache[key];
-    }else {
-        std::vector<std::string> temp;
+    } else {
+        std::vector<str> temp;
         const enum gguf_type arr_type = gguf_get_arr_type(gguf_ctx, kv_index[key]);
         int arr_n = gguf_get_arr_n(gguf_ctx, kv_index[key]);
         for (int j = 0; j < arr_n; j++) {
             if (arr_type == GGUF_TYPE_STRING) {
-                std::string val = gguf_get_arr_str(gguf_ctx, kv_index[key], j);
+                str val = gguf_get_arr_str(gguf_ctx, kv_index[key], j);
                 temp.push_back(val);
-            }else {
+            } else {
                 LOG(ERROR) << "Not a string array";
                 CHECK_RT(-1);
             }
@@ -138,19 +149,19 @@ std::vector<std::string> GemmaModel::get_str_arr_from_kv(const char *key) {
 }
 
 std::vector<f32> GemmaModel::get_f32_array_from_kv(const char *key) {
-    static std::map<std::string, std::vector<float>> cache;
+    static std::map<str, std::vector<float>> cache;
     if (cache.find(key) != cache.end()) {
         return cache[key];
-    }else {
+    } else {
         std::vector<float> temp;
         const enum gguf_type arr_type = gguf_get_arr_type(gguf_ctx, kv_index[key]);
         int arr_n = gguf_get_arr_n(gguf_ctx, kv_index[key]);
-        const void * data = gguf_get_arr_data(gguf_ctx, kv_index[key]);
+        const void *data = gguf_get_arr_data(gguf_ctx, kv_index[key]);
         for (int j = 0; j < arr_n; j++) {
             if (arr_type == GGUF_TYPE_FLOAT32) {
                 float val = static_cast<const float *>(data)[j];
                 temp.push_back(val);
-            }else {
+            } else {
                 LOG(ERROR) << "Not a float array";
                 CHECK_RT(-1);
             }
@@ -161,19 +172,19 @@ std::vector<f32> GemmaModel::get_f32_array_from_kv(const char *key) {
 }
 
 std::vector<i32> GemmaModel::get_i32_array_from_kv(const char *key) {
-    static std::map<std::string, std::vector<i32>> cache;
+    static std::map<str, std::vector<i32>> cache;
     if (cache.find(key) != cache.end()) {
         return cache[key];
-    }else {
+    } else {
         std::vector<i32> temp;
         const enum gguf_type arr_type = gguf_get_arr_type(gguf_ctx, kv_index[key]);
         int arr_n = gguf_get_arr_n(gguf_ctx, kv_index[key]);
-        const void * data = gguf_get_arr_data(gguf_ctx, kv_index[key]);
+        const void *data = gguf_get_arr_data(gguf_ctx, kv_index[key]);
         for (int j = 0; j < arr_n; j++) {
             if (arr_type == GGUF_TYPE_INT32) {
                 i32 val = static_cast<const i32 *>(data)[j];
                 temp.push_back(val);
-            }else {
+            } else {
                 LOG(ERROR) << "Not a int32 array";
                 CHECK_RT(-1);
             }
@@ -181,5 +192,9 @@ std::vector<i32> GemmaModel::get_i32_array_from_kv(const char *key) {
         cache[key] = temp;
         return temp;
     }
+}
+
+gguf_type GemmaModel::get_arr_elem_type(const char *key) {
+    return gguf_get_arr_type(gguf_ctx, kv_index[key]);
 }
 
