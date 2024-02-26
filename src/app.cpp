@@ -8,7 +8,7 @@
 #include <iostream>
 #include <memory>
 
-#include "macros.h"
+#include "macro.h"
 #include "ggml.h"
 
 int init_glog(int /*argc*/, char* argv[])
@@ -18,6 +18,8 @@ int init_glog(int /*argc*/, char* argv[])
     google::InstallFailureWriter([](const char* data, int size) {
         std::cerr.write(data, size);
     });
+    // set log level
+    FLAGS_stderrthreshold = google::INFO;
     return 0;
 }
 
