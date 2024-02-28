@@ -89,6 +89,10 @@ int GemmaModel::load_model_from_file(const char *file_path) {
 
     LOG(INFO) << kv_index.size() << " kv pairs loaded";
 
+    CHECK_RT(composite_model());
+
+    CHECK_RT(load_tokenizer())
+
     return 0;
 }
 
@@ -197,3 +201,90 @@ gguf_type GemmaModel::get_arr_elem_type(const char *key) {
     return gguf_get_arr_type(gguf_ctx, kv_index[key]);
 }
 
+int GemmaModel::composite_model() {
+    int composited_tensor_count = 0;
+    CHECK_PTR(tensor_holder.token_embd = get_tensor("token_embd.weight"));
+    CHECK_PTR(tensor_holder.output_norm = get_tensor("output_norm.weight"));
+    CHECK_PTR(tensor_holder.output = get_tensor("output_norm.weight"));
+    composited_tensor_count += 2;
+    tensor_holder.layer_num = get_u32_from_kv("gemma.block_count");
+    tensor_holder.layers.resize(tensor_holder.layer_num);
+
+    char * name = new char[64];
+    for (int i = 0; i < tensor_holder.layer_num; i++) {
+        GemmaLayer& layer = tensor_holder.layers.emplace_back();
+        snprintf(name, 64, "blk.%d.attn_output.weight", i);
+        CHECK_PTR(layer.attn_output = get_tensor(name));
+        snprintf(name, 64, "blk.%d.attn_k.weight", i);
+        CHECK_PTR(layer.attn_k = get_tensor(name));
+        snprintf(name, 64, "blk.%d.attn_v.weight", i);
+        CHECK_PTR(layer.attn_v = get_tensor(name));
+        snprintf(name, 64, "blk.%d.attn_q.weight", i);
+        CHECK_PTR(layer.attn_q = get_tensor(name));
+        snprintf(name, 64, "blk.%d.ffn_gate.weight", i);
+        CHECK_PTR(layer.ffn_gate = get_tensor(name));
+        snprintf(name, 64, "blk.%d.ffn_up.weight", i);
+        CHECK_PTR(layer.ffn_up = get_tensor(name));
+        snprintf(name, 64, "blk.%d.ffn_down.weight", i);
+        CHECK_PTR(layer.ffn_down = get_tensor(name));
+        snprintf(name, 64, "blk.%d.attn_norm.weight", i);
+        CHECK_PTR(layer.attn_norm = get_tensor(name));
+        snprintf(name, 64, "blk.%d.ffn_norm.weight", i);
+        CHECK_PTR(layer.ffn_norm = get_tensor(name));
+        composited_tensor_count += 9;
+    }
+
+    LOG(INFO) << "Composited " << composited_tensor_count << " tensors";
+
+    return 0;
+}
+
+ggml_tensor *GemmaModel::get_tensor(const char *name) {
+    if (tensors.find(name) != tensors.end()) {
+        return tensors[name];
+    } else {
+        return nullptr;
+    }
+}
+
+int GemmaModel::model_warmup() {
+    std::vector<token_id> warmup_prompt = {tokenizer.special_bos_id, tokenizer.special_eos_id};
+    std::vector<token_id> warmup_output = inference(warmup_prompt);
+    if (warmup_output.empty()) {
+        LOG(ERROR) << "Warmup failed";
+        return -1;
+    }
+    return 0;
+}
+
+int GemmaModel::load_tokenizer() {
+    tokenizer.special_bos_id = 2;
+    tokenizer.special_eos_id = 1;
+    tokenizer.special_unk_id = 3;
+    tokenizer.special_sep_id = -1;
+    tokenizer.special_pad_id = 0;
+
+    tokenizer.tokens = get_str_arr_from_kv("tokenizer.ggml.tokens");
+    auto ids = get_f32_array_from_kv("tokenizer.ggml.scores");
+    for (int i = 0; i < ids.size(); i++) {
+        tokenizer.token_id_map[tokenizer.tokens[i]] = ids[i];
+    }
+    auto types = get_i32_array_from_kv("tokenizer.ggml.token_type");
+    for (int i = 0; i < types.size(); i++) {
+        tokenizer.token_type_map[tokenizer.tokens[i]] = types[i];
+    }
+
+    // find token with bos in it
+    for (const auto & token : tokenizer.tokens) {
+        if (token.find("<bos>") != std::string::npos) {
+            LOG(INFO) << "Found <bos> token: " << token << " id: " << tokenizer.token_id_map[token];
+        }
+    }
+
+    return 0;
+}
+
+std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input) {
+
+    return std::vector<token_id>();
+}

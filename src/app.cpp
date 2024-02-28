@@ -35,6 +35,7 @@ int app::run(int argc, char* argv[])
     // }
     auto model = std::make_unique<GemmaModel>();
     model->load_model_from_file(gguf_file_path);
+    model->model_warmup();
     LOG(INFO) << "app::run";
     return 0;
 }
