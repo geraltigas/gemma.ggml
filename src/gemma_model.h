@@ -10,6 +10,7 @@
 #include <vector>
 #include <string>
 #include "type.h"
+#include "ggml-backend.h"
 
 struct GemmaLayer {
     ggml_tensor *attn_output;
@@ -33,6 +34,11 @@ struct GemmaTensorHolder {
     std::vector<GemmaLayer> layers;
 };
 
+struct GemmaMidTensorHolder {
+    ggml_tensor *input;
+    ggml_tensor *output;
+};
+
 struct GemmaTokenizer {
     std::vector<str> tokens;
     std::map<str, token_id> token_id_map;
@@ -46,10 +52,14 @@ public:
 };
 
 class GemmaModel {
-    gguf_context *gguf_ctx = nullptr;
     ggml_context *ggml_ctx = nullptr;
+    ggml_context *compute_ctx = nullptr;
+    ggml_backend_buffer_type_t buffer_type = nullptr;
+    ggml_backend_buffer_t buffer = nullptr;
+    std::vector<u8> compute_meta_buffer;
     int n_kv = 0;
     int n_tensors = 0;
+    u32 n_embd_heads = 0;
 //    int gguf_version = 0;
 //    int64_t n_elements = 0;
 //    size_t n_bytes = 0;
@@ -60,24 +70,27 @@ class GemmaModel {
     std::map<str, i32> kv_index;
 
     GemmaTensorHolder tensor_holder;
+    GemmaMidTensorHolder mid_tensor_holder;
 
     GemmaTokenizer tokenizer;
 
 public:
     int load_model_from_file(const char * file_path);
-    int load_tokenizer();
+    int load_tokenizer(gguf_context *gguf_ctx);
     int model_warmup();
     ggml_tensor *get_tensor(const char * name);
-private:
-    u32 get_u32_from_kv(const char * key);
-    f32 get_f32_from_kv(const char * key);
-    str get_str_from_kv(const char * key);
     std::vector<token_id> inference(std::vector<token_id> &input);
-    gguf_type get_arr_elem_type(const char * key);
-    std::vector<str> get_str_arr_from_kv(const char * key);
-    std::vector<f32> get_f32_array_from_kv(const char * key);
-    std::vector<i32> get_i32_array_from_kv(const char * key);
-    int composite_model();
+private:
+    u32 get_u32_from_kv(gguf_context *gguf_ctx, const char * key);
+    f32 get_f32_from_kv(gguf_context *gguf_ctx, const char * key);
+    str get_str_from_kv(gguf_context *gguf_ctx, const char * key);
+    gguf_type get_arr_elem_type(gguf_context *gguf_ctx, const char * key);
+    std::vector<str> get_str_arr_from_kv(gguf_context *gguf_ctx, const char * key);
+    std::vector<f32> get_f32_array_from_kv(gguf_context *gguf_ctx, const char * key);
+    std::vector<i32> get_i32_array_from_kv(gguf_context *gguf_ctx, const char * key);
+    int composite_model(gguf_context *gguf_ctx);
+    int load_input_tokens_to_tensor(std::vector<token_id> &input);
+
 };
 
 #endif //GEMMA_MODEL_H

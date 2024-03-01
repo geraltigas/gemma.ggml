@@ -4,12 +4,14 @@
 #include <glog/logging.h>
 #include <assert.h>
 
+#define CGRAPH_MAX_NODE_NUM 0
+
 #define ON 1
 #define OFF 0
 #define SHOW 1
 #define HIDE 0
 
-#define CODE_MASK HIDE
+#define CODE_MASK SHOW
 
 #if CODE_MASK == SHOW
 #define MASK(code) code
