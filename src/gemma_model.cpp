@@ -8,6 +8,7 @@
 
 #include <map>
 #include <glog/logging.h>
+#include <cmath>
 
 int GemmaModel::load_model_from_file(const char *file_path) {
     if (file_path == nullptr) {
@@ -22,7 +23,7 @@ int GemmaModel::load_model_from_file(const char *file_path) {
     });
 
     // hyper parameters
-    n_kv = gguf_get_n_kv(gguf_ctx);
+    n_kv_pair = gguf_get_n_kv(gguf_ctx);
     n_tensors = gguf_get_n_tensors(gguf_ctx);
 
     CHECK_PTR(gguf_ctx);
@@ -65,7 +66,7 @@ int GemmaModel::load_model_from_file(const char *file_path) {
 
     std::map<gguf_type, int> type_count;
 
-    for (int i = 0; i < n_kv; i++) {
+    for (int i = 0; i < n_kv_pair; i++) {
         const char *name = gguf_get_key(gguf_ctx, i);
         const enum gguf_type type = gguf_get_kv_type(gguf_ctx, i);
         kv_types[name] = type;
@@ -119,7 +120,9 @@ int GemmaModel::load_model_from_file(const char *file_path) {
 
     // hyper parameters
     n_embd_heads = get_u32_from_kv(gguf_ctx, "gemma.embedding_length") / get_u32_from_kv(gguf_ctx, "gemma.attention.head_count");
+    n_embd = get_u32_from_kv(gguf_ctx, "gemma.embedding_length");
 
+    CHECK_RT(init_kv_cache(gguf_ctx))
 
     CHECK_RT(composite_model(gguf_ctx));
 
@@ -312,6 +315,11 @@ int GemmaModel::load_tokenizer(gguf_context *gguf_ctx) {
         }
     }
 
+    // print id 2
+    LOG(INFO) << "Token id 2: " << tokenizer.tokens[2] << " type: " << tokenizer.token_type_map[tokenizer.tokens[2]];
+    // print id 25612
+    LOG(INFO) << "Token id 25612: " << tokenizer.tokens[25612] << " type: " << tokenizer.token_type_map[tokenizer.tokens[25612]];
+
     return 0;
 }
 
@@ -320,7 +328,18 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input) {
     ggml_cgraph *cgraph = ggml_new_graph(compute_ctx);
     CHECK_PTR(cgraph);
 
+    struct ggml_tensor *cur;
+        ASSERT_MSG(input.size() > 0, "Input size must be greater than 0");
 
+    ggml_tensor * inp_tokens_v = ggml_view_1d(compute_ctx, input_tensor_holder.inp_tokens, DEFAULT_BATCH_SIZE, 0);
+    ggml_tensor *inpL = ggml_get_rows(compute_ctx, tensor_holder.token_embd, inp_tokens_v);
+
+    inpL = ggml_scale(compute_ctx, inpL, sqrtf(n_embd));
+    ggml_tensor * inp_pos = ggml_view_1d(compute_ctx, input_tensor_holder.inp_pos, DEFAULT_TOKEN_NUM, 0);
+
+    n_kv_cache = worst_case ? n_ctx : kv_self.n;
+
+    ggml_tensor * KQ_mask = ggml_view_2d(compute_ctx, input_tensor_holder.inp_KQ_mask, n_kv_cache, DEFAULT_TOKEN_NUM, n_kv_cache * ggml_type_size(input_tensor_holder.inp_KQ_mask->type), 0);
 
     return std::vector<token_id>();
 }
@@ -331,3 +350,28 @@ int GemmaModel::load_input_tokens_to_tensor(std::vector<token_id> &input) {
                             input.size() * ggml_element_size(tensor_holder.token_embd));
     return 0;
 }
+
+int GemmaModel::init_input_tensor() {
+    ggml_init_params init_params = {
+                /* .mem_size   */ ggml_tensor_overhead()*8,
+                /* .mem_buffer */ nullptr,
+                /* .no_alloc   */ true,
+                };
+    CHECK_PTR(input_ctx = ggml_init(init_params));
+    CHECK_PTR(input_tensor_holder.inp_tokens = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_BATCH_SIZE));
+    CHECK_PTR(input_tensor_holder.inp_embd = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, n_embd, DEFAULT_BATCH_SIZE));
+    CHECK_PTR(input_tensor_holder.inp_pos = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_BATCH_SIZE));
+    CHECK_PTR(input_tensor_holder.inp_KQ_mask = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, DEFAULT_CTX_NUM, DEFAULT_BATCH_SIZE));
+    CHECK_PTR(input_tensor_holder.inp_KV_mask = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, DEFAULT_CTX_NUM, DEFAULT_BATCH_SIZE));
+    CHECK_PTR(input_tensor_holder.inp_K_shift = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_CTX_NUM));
+    CHECK_PTR(input_tensor_holder.inp_mean = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, DEFAULT_BATCH_SIZE, DEFAULT_BATCH_SIZE));
+    CHECK_PTR(input_tensor_holder.inp_cls = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_BATCH_SIZE));
+
+    return 0;
+}
+
+int GemmaModel::init_kv_cache(gguf_context *gguf_ctx) {
+    kv_cache.size = 512;
+    return 0;
+}
+

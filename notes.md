@@ -16,3 +16,11 @@ from tokens array tensor to input embedding
 
 llama.cpp:4565
 
+### kv_cache init
+
+llama.cpp:1972
+
+### kv_cache n and mem update
+
+llama.cpp:7960
+

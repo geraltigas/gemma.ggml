@@ -4,7 +4,10 @@
 #include <glog/logging.h>
 #include <assert.h>
 
-#define CGRAPH_MAX_NODE_NUM 0
+#define CGRAPH_MAX_NODE_NUM 128
+#define DEFAULT_BATCH_SIZE 512
+#define DEFAULT_CTX_NUM 512
+#define DEFAULT_TOKEN_NUM std::min(DEFAULT_CTX_NUM, DEFAULT_BATCH_SIZE)
 
 #define ON 1
 #define OFF 0
@@ -33,5 +36,11 @@
 #define CHECK_PTR(ptr) if ((ptr) == nullptr) { \
     assert(false); \
 }
+
+#define ASSERT_MSG(expr, msg) if (!(expr)) { \
+    LOG(ERROR) << msg;                       \
+    assert(false);                           \
+}
+
 
 #endif //MACROS_H
