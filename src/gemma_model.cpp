@@ -23,8 +23,8 @@ int GemmaModel::load_model_from_file(const char *file_path) {
     });
 
     // hyper parameters
-    n_kv_pair = gguf_get_n_kv(gguf_ctx);
-    n_tensors = gguf_get_n_tensors(gguf_ctx);
+    int n_kv_pair = gguf_get_n_kv(gguf_ctx);
+    int n_tensors = gguf_get_n_tensors(gguf_ctx);
 
     CHECK_PTR(gguf_ctx);
 
@@ -118,9 +118,7 @@ int GemmaModel::load_model_from_file(const char *file_path) {
 
     LOG(INFO) << kv_index.size() << " kv pairs loaded";
 
-    // hyper parameters
-    n_embd_heads = get_u32_from_kv(gguf_ctx, "gemma.embedding_length") / get_u32_from_kv(gguf_ctx, "gemma.attention.head_count");
-    n_embd = get_u32_from_kv(gguf_ctx, "gemma.embedding_length");
+    CHECK_RT(init_hyper_param(gguf_ctx));
 
     CHECK_RT(init_kv_cache(gguf_ctx))
 
@@ -324,6 +322,7 @@ int GemmaModel::load_tokenizer(gguf_context *gguf_ctx) {
 }
 
 std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input) {
+    update_kv_cache();
     CHECK_RT(load_input_tokens_to_tensor(input));
     ggml_cgraph *cgraph = ggml_new_graph(compute_ctx);
     CHECK_PTR(cgraph);
@@ -334,12 +333,12 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input) {
     ggml_tensor * inp_tokens_v = ggml_view_1d(compute_ctx, input_tensor_holder.inp_tokens, DEFAULT_BATCH_SIZE, 0);
     ggml_tensor *inpL = ggml_get_rows(compute_ctx, tensor_holder.token_embd, inp_tokens_v);
 
-    inpL = ggml_scale(compute_ctx, inpL, sqrtf(n_embd));
+    inpL = ggml_scale(compute_ctx, inpL, sqrtf(hyper_param.n_embd));
     ggml_tensor * inp_pos = ggml_view_1d(compute_ctx, input_tensor_holder.inp_pos, DEFAULT_TOKEN_NUM, 0);
 
-    n_kv_cache = worst_case ? n_ctx : kv_self.n;
+    ggml_tensor * KQ_mask = ggml_view_2d(compute_ctx, input_tensor_holder.inp_KQ_mask, hyper_param.n_kv_cache, DEFAULT_TOKEN_NUM, hyper_param.n_kv_cache * ggml_type_size(input_tensor_holder.inp_KQ_mask->type), 0);
 
-    ggml_tensor * KQ_mask = ggml_view_2d(compute_ctx, input_tensor_holder.inp_KQ_mask, n_kv_cache, DEFAULT_TOKEN_NUM, n_kv_cache * ggml_type_size(input_tensor_holder.inp_KQ_mask->type), 0);
+
 
     return std::vector<token_id>();
 }
@@ -359,7 +358,7 @@ int GemmaModel::init_input_tensor() {
                 };
     CHECK_PTR(input_ctx = ggml_init(init_params));
     CHECK_PTR(input_tensor_holder.inp_tokens = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_BATCH_SIZE));
-    CHECK_PTR(input_tensor_holder.inp_embd = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, n_embd, DEFAULT_BATCH_SIZE));
+    CHECK_PTR(input_tensor_holder.inp_embd = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, hyper_param.n_embd, DEFAULT_BATCH_SIZE));
     CHECK_PTR(input_tensor_holder.inp_pos = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_BATCH_SIZE));
     CHECK_PTR(input_tensor_holder.inp_KQ_mask = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, DEFAULT_CTX_NUM, DEFAULT_BATCH_SIZE));
     CHECK_PTR(input_tensor_holder.inp_KV_mask = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, DEFAULT_CTX_NUM, DEFAULT_BATCH_SIZE));
@@ -371,7 +370,90 @@ int GemmaModel::init_input_tensor() {
 }
 
 int GemmaModel::init_kv_cache(gguf_context *gguf_ctx) {
-    kv_cache.size = 512;
+    _kv_cache.size = DEFAULT_CTX_NUM;
+    u32 n_embd_k_gqa = hyper_param.n_embd_heads;
+    u32 n_embd_v_gqa = hyper_param.n_embd_heads;
+    u32 n_layer = hyper_param.n_layer;
+
+    _kv_cache.has_shift = false;
+
+    _kv_cache.head = 0;
+    _kv_cache.size = DEFAULT_CTX_NUM;
+    _kv_cache.used = 0;
+
+    _kv_cache.type_k = DEFAULT_KV_CACHE_TYPE;
+    _kv_cache.type_v = DEFAULT_KV_CACHE_TYPE;
+
+    _kv_cache.cells.clear();
+    _kv_cache.cells.resize(DEFAULT_CTX_NUM);
+
+    struct ggml_init_params params = {
+            /*.mem_size   =*/ 2u*n_layer*ggml_tensor_overhead(),
+            /*.mem_buffer =*/ nullptr,
+            /*.no_alloc   =*/ true,
+            };
+
+    CHECK_PTR(kv_ctx = ggml_init(params))
+
+    _kv_cache.k_l.reserve(n_layer);
+    _kv_cache.v_l.reserve(n_layer);
+
+    for (int i = 0; i < (int) n_layer; i++) {
+        ggml_tensor * k = ggml_new_tensor_1d(kv_ctx, _kv_cache.type_k, n_embd_k_gqa*DEFAULT_CTX_NUM);
+        ggml_tensor * v = ggml_new_tensor_1d(kv_ctx, _kv_cache.type_v, n_embd_v_gqa*DEFAULT_CTX_NUM);
+        ggml_format_name(k, "cache_k_l%d", i);
+        ggml_format_name(v, "cache_v_l%d", i);
+        _kv_cache.k_l.push_back(k);
+        _kv_cache.v_l.push_back(v);
+    }
+
+    _kv_cache.buffer_type = ggml_backend_cpu_buffer_type();
+    _kv_cache.buffer = ggml_backend_alloc_ctx_tensors_from_buft(kv_ctx, _kv_cache.buffer_type);
+    ggml_backend_buffer_clear(buffer, 0);
+
+
+    CHECK_PTR(_kv_cache.buffer);
+        LOG(INFO) << "KV buffer size: " << ggml_backend_buffer_name(_kv_cache.buffer) << " = "
+                  << ggml_backend_buffer_get_size(_kv_cache.buffer) / 1024.0 / 1024.0 << " MiB";
+
     return 0;
 }
 
+int GemmaModel::init_hyper_param(gguf_context *gguf_ctx) {
+    hyper_param.n_layer = get_u32_from_kv(gguf_ctx, "gemma.block_count");
+    hyper_param.n_kv_pair = gguf_get_n_kv(gguf_ctx);
+    hyper_param.n_tensors = gguf_get_n_tensors(gguf_ctx);
+    hyper_param.n_embd = get_u32_from_kv(gguf_ctx, "gemma.embedding_length");
+    hyper_param.n_head = get_u32_from_kv(gguf_ctx, "gemma.attention.head_count");
+    hyper_param.n_embd_heads = get_u32_from_kv(gguf_ctx, "gemma.embedding_length") / get_u32_from_kv(gguf_ctx, "gemma.attention.head_count");
+    return 0;
+}
+
+static int32_t kv_cache_cell_max(const struct kv_cache & cache) {
+    for (uint32_t i = cache.size - 1; i > 0; --i) {
+        if (cache.cells[i].pos >= 0 && !cache.cells[i].is_empty()) {
+            return i + 1;
+        }
+    }
+
+    return 0;
+}
+
+int GemmaModel::update_kv_cache() {
+    _kv_cache.n = std::min((int32_t) DEFAULT_CTX_NUM, std::max(32, GGML_PAD(kv_cache_cell_max(_kv_cache), 32)));
+    return 0;
+}
+
+//static int32_t kv_cache_cell_max(const struct kv_cache & cache) {
+//    for (uint32_t i = cache.size - 1; i > 0; --i) {
+//        if (cache.cells[i].pos >= 0 && !cache.cells[i].is_empty()) {
+//            return i + 1;
+//        }
+//    }
+//
+//    return 0;
+//}
+
+//void GemmaModel::update_kv_cache() {
+//    _kv_cache.n = std::min((int32_t) DEFAULT_CTX_NUM, std::max(32, GGML_PAD(kv_cache_cell_max(_kv_cache), 32)));
+//}

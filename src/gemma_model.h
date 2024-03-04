@@ -65,12 +65,12 @@ public:
 
 
 struct kv_cell {
-    i32 pos   = -1;
+    i32 pos = -1;
     i32 delta = 0;
 
     std::set<i32> seq_id;
 
-    bool has_seq_id(const i32 & id) const {
+    bool has_seq_id(const i32 &id) const {
         return seq_id.find(id) != seq_id.end();
     }
 
@@ -78,7 +78,7 @@ struct kv_cell {
         return seq_id.empty();
     }
 
-    bool is_same_seq(const llama_kv_cell & other) const {
+    bool is_same_seq(const kv_cell &other) const {
         return seq_id == other.seq_id;
     }
 };
@@ -106,25 +106,35 @@ struct kv_cache {
     std::vector<struct ggml_tensor *> k_l; // per layer
     std::vector<struct ggml_tensor *> v_l;
 
-    std::vector<struct ggml_context *> ctxs;
-    std::vector<ggml_backend_buffer_t> bufs;
+    ggml_backend_buffer_type_t buffer_type = nullptr;
+    ggml_backend_buffer_t buffer = nullptr;
 
-    size_t total_size() const {
-        size_t size = 0;
-        for (ggml_backend_buffer_t buf : bufs) {
-            size += ggml_backend_buffer_get_size(buf);
-        }
-        return size;
-    }
+//    size_t total_size() const {
+//        size_t size = 0;
+//        for (ggml_backend_buffer_t buf: bufs) {
+//            size += ggml_backend_buffer_get_size(buf);
+//        }
+//        return size;
+//    }
 
-    ~kv_cache() {
-        for (struct ggml_context * ctx : ctxs) {
-            ggml_free(ctx);
-        }
-        for (ggml_backend_buffer_t buf : bufs) {
-            ggml_backend_buffer_free(buf);
-        }
-    }
+//    ~kv_cache() {
+//        for (struct ggml_context *ctx: ctxs) {
+//            ggml_free(ctx);
+//        }
+//        for (ggml_backend_buffer_t buf: bufs) {
+//            ggml_backend_buffer_free(buf);
+//        }
+//    }
+};
+
+struct HyperParam {
+    u32 n_layer = 0;
+    u32 n_kv_pair = 0;
+    u32 n_tensors = 0;
+    u32 n_embd = 0;
+    u32 n_head = 0;
+    u32 n_embd_heads = 0;
+    u32 n_kv_cache = 0;
 };
 
 
@@ -132,16 +142,14 @@ class GemmaModel {
     ggml_context *input_ctx = nullptr;
     ggml_context *ggml_ctx = nullptr;
     ggml_context *compute_ctx = nullptr;
+    ggml_context *kv_ctx = nullptr;
     ggml_backend_buffer_type_t buffer_type = nullptr;
     ggml_backend_buffer_t buffer = nullptr;
     std::vector<u8> compute_meta_buffer;
-    int n_kv_pair = 0;
-    int n_tensors = 0;
-    u32 n_embd = 0;
-    u32 n_embd_heads = 0;
-    u32 n_kv_cache = 0;
 
-    kv_cache kv_cache;
+    HyperParam hyper_param;
+
+    kv_cache _kv_cache;
     std::map<ggml_type, u32> n_type;
     std::map<str, ggml_tensor *> tensors;
     std::map<str, ggml_type> tensor_types;
@@ -155,25 +163,42 @@ class GemmaModel {
     GemmaTokenizer tokenizer;
 
 public:
-    int load_model_from_file(const char * file_path);
+    int load_model_from_file(const char *file_path);
+
     int load_tokenizer(gguf_context *gguf_ctx);
+
     int model_warmup();
+
     int init_input_tensor();
-    ggml_tensor *get_tensor(const char * name);
+
+    ggml_tensor *get_tensor(const char *name);
+
     std::vector<token_id> inference(std::vector<token_id> &input);
+
 private:
-    u32 get_u32_from_kv(gguf_context *gguf_ctx, const char * key);
-    f32 get_f32_from_kv(gguf_context *gguf_ctx, const char * key);
-    str get_str_from_kv(gguf_context *gguf_ctx, const char * key);
-    gguf_type get_arr_elem_type(gguf_context *gguf_ctx, const char * key);
-    std::vector<str> get_str_arr_from_kv(gguf_context *gguf_ctx, const char * key);
-    std::vector<f32> get_f32_array_from_kv(gguf_context *gguf_ctx, const char * key);
-    std::vector<i32> get_i32_array_from_kv(gguf_context *gguf_ctx, const char * key);
+    u32 get_u32_from_kv(gguf_context *gguf_ctx, const char *key);
+
+    f32 get_f32_from_kv(gguf_context *gguf_ctx, const char *key);
+
+    str get_str_from_kv(gguf_context *gguf_ctx, const char *key);
+
+    gguf_type get_arr_elem_type(gguf_context *gguf_ctx, const char *key);
+
+    std::vector<str> get_str_arr_from_kv(gguf_context *gguf_ctx, const char *key);
+
+    std::vector<f32> get_f32_array_from_kv(gguf_context *gguf_ctx, const char *key);
+
+    std::vector<i32> get_i32_array_from_kv(gguf_context *gguf_ctx, const char *key);
+
     int composite_model(gguf_context *gguf_ctx);
+
     int load_input_tokens_to_tensor(std::vector<token_id> &input);
+
+    int init_hyper_param(gguf_context *gguf_ctx);
+
     int init_kv_cache(gguf_context *gguf_ctx);
-    ggml_tensor * cgraph_build_inp_embd(std::vector<token_id> &input, ggml_tensor *tok_embd, ggml_tensor *inp_tokens,
-                                        ggml_tensor *inp_embd);
+
+    int update_kv_cache();
 };
 
 #endif //GEMMA_MODEL_H
