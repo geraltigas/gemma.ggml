@@ -134,7 +134,10 @@ struct HyperParam {
     u32 n_embd = 0;
     u32 n_head = 0;
     u32 n_embd_heads = 0;
-    u32 n_kv_cache = 0;
+    f32 f_norm_rms_eps = 0;
+    u32 origin_ctx_len = 0;
+    u32 n_head_kv;
+//    u32 n_kv_cache = 0;
 };
 
 
@@ -199,6 +202,53 @@ private:
     int init_kv_cache(gguf_context *gguf_ctx);
 
     int update_kv_cache();
+
+    ggml_tensor *cgraph_build_norm(ggml_context *pContext, ggml_tensor *pTensor, ggml_tensor *norm);
+
+    ggml_tensor *
+    cgraph_build_kv(ggml_context *ctx, ggml_cgraph *cgraph, ggml_tensor *q_tensor, ggml_tensor *k_tensor,
+                    ggml_tensor *v_tensor,
+                    int index_layer);
+
+    ggml_tensor *llm_build_kqv(
+            struct ggml_context *ctx,
+            struct ggml_cgraph *graph,
+            struct ggml_tensor *wo,
+            struct ggml_tensor *q_cur,
+            struct ggml_tensor *kq_mask,
+            int64_t n_ctx,
+            int32_t n_tokens,
+            int32_t n_kv,
+            float kq_scale,
+            int index_layer);
+
+    void llm_build_kv_store(
+            ggml_context *ctx,
+            ggml_cgraph *graph,
+            ggml_tensor *k_tensor,
+            ggml_tensor *v_tensor,
+            i64 n_ctx,
+            i32 n_tokens,
+            i32 kv_head,
+            i64 index_layer);
+
+    ggml_tensor *llm_build_kv(
+            ggml_context *ctx,
+            ggml_cgraph *cgraph,
+            ggml_tensor *attn_output,
+            ggml_tensor *k_tensor,
+            ggml_tensor *v_tensor,
+            ggml_tensor *q_tensor,
+            ggml_tensor *kq_mask,
+            i64 n_ctx,
+            i32 n_tokens,
+            i32 kv_head,
+            i32 n_kv,
+            float kq_scale,
+            int index_layer);
+
+    ggml_tensor *
+    cgraph_build_ffn(ggml_context *ctx, ggml_tensor *cur, ggml_tensor *up, ggml_tensor *gate, ggml_tensor *down);
 };
 
 #endif //GEMMA_MODEL_H
