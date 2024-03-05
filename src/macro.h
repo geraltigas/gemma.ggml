@@ -4,7 +4,7 @@
 #include <glog/logging.h>
 #include <assert.h>
 
-#define CGRAPH_MAX_NODE_NUM 128
+#define CGRAPH_MAX_NODE_NUM 1024
 #define DEFAULT_BATCH_SIZE 512
 #define DEFAULT_CTX_NUM 512
 #define DEFAULT_TOKEN_NUM std::min(DEFAULT_CTX_NUM, DEFAULT_BATCH_SIZE)
