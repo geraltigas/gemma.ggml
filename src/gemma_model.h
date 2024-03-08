@@ -203,6 +203,8 @@ private:
 
     int update_kv_cache();
 
+    ggml_tensor *get_tensor_from_meta(ggml_context *ctx, ggml_tensor *tensor);
+
     ggml_tensor *cgraph_build_norm(ggml_context *pContext, ggml_tensor *pTensor, ggml_tensor *norm);
 
     ggml_tensor *

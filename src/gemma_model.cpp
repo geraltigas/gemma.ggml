@@ -4,7 +4,7 @@
 
 #include "gemma_model.h"
 #include "macro.h"
-#include "ggml-backend.h"
+#include <tensor_dump.h>
 
 #include <map>
 #include <glog/logging.h>
@@ -33,6 +33,10 @@ int GemmaModel::load_model_from_file(const char *file_path) {
     buffer = ggml_backend_alloc_ctx_tensors_from_buft(ggml_ctx, buffer_type);
     CHECK_PTR(buffer);
     ggml_backend_buffer_set_usage(buffer, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+    LOG(INFO) << "Buffer size: " << ggml_backend_buffer_name(buffer) << " = "
+              << ggml_backend_buffer_get_size(buffer) / 1024.0 / 1024.0 << " MiB";
+
+
     // allocate cgraph mem
     compute_meta_buffer.resize(ggml_tensor_overhead() * CGRAPH_MAX_NODE_NUM + ggml_graph_overhead());
 
@@ -46,8 +50,7 @@ int GemmaModel::load_model_from_file(const char *file_path) {
 
     //    LLAMA_LOG_INFO("%s: %10s buffer size = %8.2f MiB\n", __func__, ggml_backend_buffer_name(buf), ggml_backend_buffer_get_size(buf) / 1024.0 / 1024.0)
     // USE LOG
-    LOG(INFO) << "Buffer size: " << ggml_backend_buffer_name(buffer) << " = "
-              << ggml_backend_buffer_get_size(buffer) / 1024.0 / 1024.0 << " MiB";
+
 
     for (int i = 0; i < n_tensors; i++) {
         const char *name = gguf_get_tensor_name(gguf_ctx, i);
@@ -290,11 +293,11 @@ int GemmaModel::model_warmup() {
 }
 
 int GemmaModel::load_tokenizer(gguf_context *gguf_ctx) {
-    tokenizer.special_bos_id = 2;
-    tokenizer.special_eos_id = 1;
-    tokenizer.special_unk_id = 3;
+    tokenizer.special_bos_id = (f32) get_u32_from_kv(gguf_ctx, "tokenizer.ggml.bos_token_id");
+    tokenizer.special_eos_id = (f32) get_u32_from_kv(gguf_ctx, "tokenizer.ggml.eos_token_id");
+    tokenizer.special_unk_id = (f32) get_u32_from_kv(gguf_ctx, "tokenizer.ggml.unknown_token_id");
+    tokenizer.special_pad_id = (f32) get_u32_from_kv(gguf_ctx, "tokenizer.ggml.padding_token_id");
     tokenizer.special_sep_id = -1;
-    tokenizer.special_pad_id = 0;
 
     tokenizer.tokens = get_str_arr_from_kv(gguf_ctx, "tokenizer.ggml.tokens");
     auto ids = get_f32_array_from_kv(gguf_ctx, "tokenizer.ggml.scores");
@@ -330,6 +333,10 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input) {
 
     struct ggml_tensor *cur;
     ASSERT_MSG(input.size() > 0, "Input size must be greater than 0");
+
+//    dump_tensor("inp_tokens", input_tensor_holder.inp_tokens);
+    dump_tensor("token_embd", tensor_holder.token_embd);
+    CHECK_BOOL(compare_tensors("token_embd"))
 
     ggml_tensor *inp_tokens_v = ggml_view_1d(compute_ctx, input_tensor_holder.inp_tokens, DEFAULT_BATCH_SIZE, 0);
     ggml_tensor *inpL = ggml_get_rows(compute_ctx, tensor_holder.token_embd, inp_tokens_v);
@@ -519,7 +526,7 @@ ggml_tensor *GemmaModel::cgraph_build_ffn(
         ggml_tensor *up,
         ggml_tensor *gate,
         ggml_tensor *down) {
-    ggml_tensor * tmp = ggml_mul_mat(ctx, up, cur);
+    ggml_tensor *tmp = ggml_mul_mat(ctx, up, cur);
     cur = ggml_mul_mat(ctx, gate, cur);
     cur = ggml_gelu(ctx, cur);
     cur = ggml_mul(ctx, cur, tmp);
@@ -661,5 +668,11 @@ ggml_tensor *GemmaModel::llm_build_kv(
 
     llm_build_kv_store(ctx, cgraph, k_tensor, v_tensor, n_ctx, n_tokens, kv_head, index_layer);
     return llm_build_kqv(ctx, cgraph, attn_output, q_tensor, kq_mask, n_ctx, n_tokens, n_kv, kq_scale, index_layer);
+}
+
+ggml_tensor *GemmaModel::get_tensor_from_meta(ggml_context *ctx, ggml_tensor *tensor) {
+    ggml_tensor *t = ggml_dup_tensor(ctx, tensor);
+    ggml_set_name(t, ggml_get_name(tensor));
+    return t;
 }
 
