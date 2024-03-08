@@ -6,7 +6,7 @@
 #include <glog/logging.h>
 
 void dump_tensor(const char *name, const ggml_tensor *tensor) {
-    LOG(INFO) << "Dumping tensor " << name;
+    LOG(INFO) << "Dumping tensor: " << name;
     size_t byte_size = tensor->nb[3];
     // create a file with name+suffix
 #if MODE == TARGET
@@ -69,6 +69,9 @@ bool compare_tensors(const char *name) {
             return false;
         }
     }
+
+    // pass the test
+    LOG(INFO) << "Tensor: " << name << " passed the test";
 
     return true;
 }

@@ -18,7 +18,7 @@ int GemmaModel::load_model_from_file(const char *file_path) {
     gguf_context *gguf_ctx = nullptr;
 
     gguf_ctx = gguf_init_from_file(file_path, {
-            .no_alloc = true,
+            .no_alloc = false,
             .ctx = &ggml_ctx
     });
 
@@ -28,13 +28,13 @@ int GemmaModel::load_model_from_file(const char *file_path) {
 
     CHECK_PTR(gguf_ctx);
 
-    buffer_type = ggml_backend_cpu_buffer_type();
-    CHECK_PTR(buffer_type);
-    buffer = ggml_backend_alloc_ctx_tensors_from_buft(ggml_ctx, buffer_type);
-    CHECK_PTR(buffer);
-    ggml_backend_buffer_set_usage(buffer, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
-    LOG(INFO) << "Buffer size: " << ggml_backend_buffer_name(buffer) << " = "
-              << ggml_backend_buffer_get_size(buffer) / 1024.0 / 1024.0 << " MiB";
+//    buffer_type = ggml_backend_cpu_buffer_type();
+//    CHECK_PTR(buffer_type);
+//    buffer = ggml_backend_alloc_ctx_tensors_from_buft(ggml_ctx, buffer_type);
+//    CHECK_PTR(buffer);
+//    ggml_backend_buffer_set_usage(buffer, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+//    LOG(INFO) << "Buffer size: " << ggml_backend_buffer_name(buffer) << " = "
+//              << ggml_backend_buffer_get_size(buffer) / 1024.0 / 1024.0 << " MiB";
 
 
     // allocate cgraph mem
@@ -58,7 +58,7 @@ int GemmaModel::load_model_from_file(const char *file_path) {
 //                LOG(INFO) << "Loading tensor: " << name;
 //        )
         ggml_tensor *t = ggml_get_tensor(ggml_ctx, name);
-        CHECK_PTR(t->buffer);
+//        CHECK_PTR(t->buffer);
         tensors[name] = t;
         ggml_type type = gguf_get_tensor_type(gguf_ctx, i);
         tensor_types[name] = type;
@@ -334,9 +334,8 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input) {
     struct ggml_tensor *cur;
     ASSERT_MSG(input.size() > 0, "Input size must be greater than 0");
 
-//    dump_tensor("inp_tokens", input_tensor_holder.inp_tokens);
-    dump_tensor("token_embd", tensor_holder.token_embd);
-    CHECK_BOOL(compare_tensors("token_embd"))
+//    dump_tensor("token_embd", tensor_holder.token_embd);
+//    CHECK_BOOL(compare_tensors("token_embd"))
 
     ggml_tensor *inp_tokens_v = ggml_view_1d(compute_ctx, input_tensor_holder.inp_tokens, DEFAULT_BATCH_SIZE, 0);
     ggml_tensor *inpL = ggml_get_rows(compute_ctx, tensor_holder.token_embd, inp_tokens_v);
@@ -407,8 +406,9 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input) {
 
 int GemmaModel::load_input_tokens_to_tensor(std::vector<token_id> &input) {
     CHECK_PTR(tensor_holder.token_embd);
-    ggml_backend_tensor_set(tensor_holder.token_embd, input.data(), 0,
-                            input.size() * ggml_element_size(tensor_holder.token_embd));
+    ggml_backend_tensor_set(input_tensor_holder.inp_tokens, input.data(), 0,
+                            input.size() * ggml_element_size(input_tensor_holder.inp_tokens));
+
     return 0;
 }
 
@@ -475,7 +475,7 @@ int GemmaModel::init_kv_cache(gguf_context *gguf_ctx) {
 
     _kv_cache.buffer_type = ggml_backend_cpu_buffer_type();
     _kv_cache.buffer = ggml_backend_alloc_ctx_tensors_from_buft(kv_ctx, _kv_cache.buffer_type);
-    ggml_backend_buffer_clear(buffer, 0);
+//    ggml_backend_buffer_clear(buffer, 0);
 
 
     CHECK_PTR(_kv_cache.buffer);
