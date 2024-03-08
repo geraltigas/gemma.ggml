@@ -2,3 +2,4 @@ cmake-build-debug/
 models/
 lib/
 .idea/
+tensor_dump/
