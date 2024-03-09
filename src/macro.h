@@ -17,6 +17,7 @@
 #define DEFAULT_BETA_FAST 32
 #define DEFAULT_BETA_SLOW 1
 #define DEFAULT_F_MAX_ALIBI_BIAS 0
+#define N_THREADS 4
 
 #define ON 1
 #define OFF 0

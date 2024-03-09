@@ -336,7 +336,9 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, Infere
 
     ggml_tensor *inp_tokens_v = ggml_view_1d(compute_ctx, input_tensor_holder.inp_tokens, input.size(), 0);
     ggml_set_name(inp_tokens_v, "inp_tokens (view)");
-    ggml_tensor *inpL = ggml_get_rows(compute_ctx, tensor_holder.token_embd, inp_tokens_v);
+    ggml_tensor *inpL = ggml_get_rows(compute_ctx, tensor_holder.token_embd, inp_tokens_v); //TODO: find out why segfault, the .data of the get_raw_op tensor is nullptr
+    dump_tensor("token_embd", tensor_holder.token_embd);
+    compare_tensors("token_embd");
 
     inpL = ggml_scale(compute_ctx, inpL, sqrtf(hyper_param.n_embd));
     ggml_tensor *inp_pos = ggml_view_1d(compute_ctx, input_tensor_holder.inp_pos, input.size(), 0);
@@ -376,9 +378,9 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, Infere
                     DEFAULT_FREQ_SCALE,
                     DEFAULT_EXT_FACTOR, DEFAULT_ATTN_FACTOR, DEFAULT_BETA_FAST, DEFAULT_BETA_SLOW);
 
-            cur = llm_build_kv(compute_ctx, cgraph, tensor_holder.layers[il].attn_output, Kcur, Vcur, Qcur, KQ_mask,
-                               DEFAULT_CTX_NUM,
-                               input.size(), _kv_cache.head, _kv_cache.n, 1.0f, il);
+            cur = cgraph_build_kv(compute_ctx, cgraph, tensor_holder.layers[il].attn_output, Kcur, Vcur, Qcur, KQ_mask,
+                                  DEFAULT_CTX_NUM,
+                                  input.size(), _kv_cache.head, _kv_cache.n, 1.0f, il);
         }
 
         ggml_tensor *sa_out = ggml_add(compute_ctx, cur, inpL);
@@ -400,6 +402,13 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, Infere
     cur = ggml_mul_mat(compute_ctx, tensor_holder.output, cur);
 
     ggml_build_forward_expand(cgraph, cur);
+
+    ggml_tensor *result_output = cgraph->nodes[cgraph->n_nodes - 1];
+    ggml_tensor *result_norm = cgraph->nodes[cgraph->n_nodes - 2];
+    ggml_set_name(result_norm, "result_norm");
+    ggml_set_name(result_output, "result_output");
+
+    ggml_graph_compute_with_ctx(compute_ctx,cgraph, N_THREADS);
 
     auto print_all = [](ggml_cgraph *gf) {
         auto to_file = "/home/geraltigas/Desktop/gemma.ggml/tensor_dump/tensor_in_source_cgraph";
@@ -471,6 +480,23 @@ int GemmaModel::load_input_tokens_to_tensor(std::vector<token_id> &input, Infere
     CHECK_PTR(input_tensor_holder.inp_pos);
     ggml_backend_tensor_set(input_tensor_holder.inp_pos, pos.data(), 0,
                             pos.size() * ggml_element_size(input_tensor_holder.inp_pos));
+
+    // init kq mask
+    auto *kq_mask_data = (float*)input_tensor_holder.inp_KQ_mask->data;
+    CHECK_PTR(kq_mask_data);
+    size_t x = _kv_cache.n;
+    size_t y = input.size();
+
+    for (int i = 0; i < y; i++) {
+        for (int j = 0; j < x; j++) {
+            if (i < j) {
+                // negative infinity
+                kq_mask_data[i * x + j] = -INFINITY;
+            } else {
+                kq_mask_data[i * x + j] = 0;
+            }
+        }
+    }
 
     return 0;
 }
@@ -584,12 +610,8 @@ ggml_tensor *GemmaModel::cgraph_build_norm(ggml_context *ctx, ggml_tensor *cur, 
     return cur;
 }
 
-ggml_tensor *GemmaModel::cgraph_build_ffn(
-        ggml_context *ctx,
-        ggml_tensor *cur,
-        ggml_tensor *up,
-        ggml_tensor *gate,
-        ggml_tensor *down) {
+ggml_tensor *GemmaModel::cgraph_build_ffn(ggml_context *ctx, ggml_tensor *cur, ggml_tensor *up, ggml_tensor *gate,
+                                          ggml_tensor *down) {
     ggml_tensor *tmp = ggml_mul_mat(ctx, up, cur);
     cur = ggml_mul_mat(ctx, gate, cur);
     cur = ggml_gelu(ctx, cur);
@@ -599,53 +621,9 @@ ggml_tensor *GemmaModel::cgraph_build_ffn(
 }
 
 ggml_tensor *
-GemmaModel::cgraph_build_kv(ggml_context *ctx, ggml_cgraph *cgraph, ggml_tensor *q_tensor, ggml_tensor *k_tensor,
-                            ggml_tensor *v_tensor,
-                            int index_layer) {
-    ggml_build_forward_expand(cgraph, q_tensor);
-    ggml_build_forward_expand(cgraph, k_tensor);
-    ggml_build_forward_expand(cgraph, v_tensor);
-
-    ggml_tensor *v_cur_t = ggml_transpose(ctx,
-                                          ggml_reshape_2d(ctx, v_tensor, hyper_param.n_embd_heads, DEFAULT_TOKEN_NUM));
-
-    ggml_tensor *k_cache_view = ggml_view_1d(ctx, _kv_cache.k_l[index_layer],
-                                             DEFAULT_TOKEN_NUM * hyper_param.n_embd_heads,
-                                             (ggml_row_size(_kv_cache.k_l[index_layer]->type,
-                                                            hyper_param.n_embd_heads)) * _kv_cache.head);
-
-    ggml_tensor *v_cache_view = ggml_view_2d(ctx, _kv_cache.v_l[index_layer], DEFAULT_TOKEN_NUM,
-                                             hyper_param.n_embd_heads,
-                                             (DEFAULT_CTX_NUM) * ggml_element_size(_kv_cache.v_l[index_layer]),
-                                             (_kv_cache.head) * ggml_element_size(_kv_cache.v_l[index_layer]));
-
-    ggml_build_forward_expand(cgraph, ggml_cpy(ctx, k_tensor, k_cache_view));
-    ggml_build_forward_expand(cgraph, ggml_cpy(ctx, v_cur_t, v_cache_view));
-
-    ggml_tensor *q = ggml_permute(ctx, q_tensor, 0, 2, 1, 3);
-
-//    ggml_tensor *k =
-//            ggml_view_3d(ctx, _kv_cache.k_l[index_layer],
-//                         hyper_param.n_embd_heads, _kv_cache.n, n_head_kv,
-//                         ggml_row_size(kv.k_l[il]->type, n_embd_k_gqa),
-//                         ggml_row_size(kv.k_l[il]->type, n_embd_head_k),
-//                         0);
-//
-//    return cur;
-    return nullptr;
-}
-
-ggml_tensor *GemmaModel::llm_build_kqv(
-        struct ggml_context *ctx,
-        struct ggml_cgraph *graph,
-        struct ggml_tensor *attn_output,
-        struct ggml_tensor *q_tensor,
-        struct ggml_tensor *kq_mask,
-        i64 n_ctx,
-        i32 n_tokens,
-        i32 n_kv,
-        float kq_scale,
-        int index_layer) {
+GemmaModel::cgraph_build_kqv(struct ggml_context *ctx, struct ggml_cgraph *graph, struct ggml_tensor *attn_output,
+                             struct ggml_tensor *q_tensor, struct ggml_tensor *kq_mask, i64 n_ctx, i32 n_tokens, i32 n_kv,
+                             float kq_scale, int index_layer) {
 
     const int64_t n_head = hyper_param.n_head;
     const int64_t n_head_kv = hyper_param.n_head_kv;
@@ -687,15 +665,8 @@ ggml_tensor *GemmaModel::llm_build_kqv(
 }
 
 
-void GemmaModel::llm_build_kv_store(
-        ggml_context *ctx,
-        ggml_cgraph *graph,
-        ggml_tensor *k_tensor,
-        ggml_tensor *v_tensor,
-        i64 n_ctx,
-        i32 n_tokens,
-        i32 kv_head,
-        i64 index_layer) {
+void GemmaModel::cgraph_build_kv_store(ggml_context *ctx, ggml_cgraph *graph, ggml_tensor *k_tensor, ggml_tensor *v_tensor,
+                                       i64 n_ctx, i32 n_tokens, i32 kv_head, i64 index_layer) {
 
     const i64 n_embd_v_gqa = hyper_param.n_embd_heads;
     const i64 n_embd_k_gqa = hyper_param.n_embd_heads;
@@ -712,26 +683,16 @@ void GemmaModel::llm_build_kv_store(
     ggml_build_forward_expand(graph, ggml_cpy(ctx, v_cur_t, v_cache_view));
 }
 
-ggml_tensor *GemmaModel::llm_build_kv(
-        ggml_context *ctx,
-        ggml_cgraph *cgraph,
-        ggml_tensor *attn_output,
-        ggml_tensor *k_tensor,
-        ggml_tensor *v_tensor,
-        ggml_tensor *q_tensor,
-        ggml_tensor *kq_mask,
-        i64 n_ctx,
-        i32 n_tokens,
-        i32 kv_head,
-        i32 n_kv,
-        float kq_scale,
-        int index_layer) {
+ggml_tensor *
+GemmaModel::cgraph_build_kv(ggml_context *ctx, ggml_cgraph *cgraph, ggml_tensor *attn_output, ggml_tensor *k_tensor,
+                            ggml_tensor *v_tensor, ggml_tensor *q_tensor, ggml_tensor *kq_mask, i64 n_ctx, i32 n_tokens,
+                            i32 kv_head, i32 n_kv, float kq_scale, int index_layer) {
     ggml_build_forward_expand(cgraph, q_tensor);
     ggml_build_forward_expand(cgraph, k_tensor);
     ggml_build_forward_expand(cgraph, v_tensor);
 
-    llm_build_kv_store(ctx, cgraph, k_tensor, v_tensor, n_ctx, n_tokens, kv_head, index_layer);
-    return llm_build_kqv(ctx, cgraph, attn_output, q_tensor, kq_mask, n_ctx, n_tokens, n_kv, kq_scale, index_layer);
+    cgraph_build_kv_store(ctx, cgraph, k_tensor, v_tensor, n_ctx, n_tokens, kv_head, index_layer);
+    return cgraph_build_kqv(ctx, cgraph, attn_output, q_tensor, kq_mask, n_ctx, n_tokens, n_kv, kq_scale, index_layer);
 }
 
 ggml_tensor *GemmaModel::get_tensor_from_meta(ggml_context *ctx, ggml_tensor *tensor) {

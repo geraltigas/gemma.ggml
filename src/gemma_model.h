@@ -217,19 +217,19 @@ private:
                     ggml_tensor *v_tensor,
                     int index_layer);
 
-    ggml_tensor *llm_build_kqv(
+    ggml_tensor *cgraph_build_kqv(
             struct ggml_context *ctx,
             struct ggml_cgraph *graph,
-            struct ggml_tensor *wo,
-            struct ggml_tensor *q_cur,
+            struct ggml_tensor *attn_output,
+            struct ggml_tensor *q_tensor,
             struct ggml_tensor *kq_mask,
-            int64_t n_ctx,
-            int32_t n_tokens,
-            int32_t n_kv,
+            i64 n_ctx,
+            i32 n_tokens,
+            i32 n_kv,
             float kq_scale,
             int index_layer);
 
-    void llm_build_kv_store(
+    void cgraph_build_kv_store(
             ggml_context *ctx,
             ggml_cgraph *graph,
             ggml_tensor *k_tensor,
@@ -239,7 +239,7 @@ private:
             i32 kv_head,
             i64 index_layer);
 
-    ggml_tensor *llm_build_kv(
+    ggml_tensor *cgraph_build_kv(
             ggml_context *ctx,
             ggml_cgraph *cgraph,
             ggml_tensor *attn_output,
