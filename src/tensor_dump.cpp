@@ -105,9 +105,37 @@ std::map<std::string, std::string> get_tensor_dump_list() {
     return tensor_dump_list;
 }
 
+void *load_tensor(const char *name, TensorDumpMode mode) {
+    std::string file_name;
+    if (mode == TensorDumpMode::_TARGET) {
+        file_name = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "_target";
+    } else {
+        file_name = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "_source";
+    }
+    FILE *file = fopen(file_name.c_str(), "rb");
+    if (file == nullptr) {
+        LOG(ERROR) << "failed to open file " << file_name;
+        return nullptr;
+    }
+    fseek(file, 0, SEEK_END);
+    size_t file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    void *buffer = malloc(file_size);
+    fread(buffer, file_size, 1, file);
+    fclose(file);
+    return buffer;
+}
+
 TEST(tensor_dump, get_list) {
     std::map<std::string, std::string> tensor_dump_list = get_tensor_dump_list();
     for (auto &item : tensor_dump_list) {
         LOG(INFO) << item.first << " " << item.second;
+    }
+}
+
+TEST(tensor_dump, load_tensor) {
+    float *tensor = (float *)load_tensor("inp_KQ_mask", TensorDumpMode::_TARGET);
+    for (size_t i = 0; i < 10; i++) {
+        LOG(INFO) << tensor[i];
     }
 }

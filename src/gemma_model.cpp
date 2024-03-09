@@ -334,9 +334,6 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, Infere
     struct ggml_tensor *cur;
     ASSERT_MSG(input.size() > 0, "input size must be greater than 0");
 
-//    dump_tensor("inp_pos", input_tensor_holder.inp_pos);
-//    CHECK_BOOL(compare_tensors("inp_pos"));
-
     ggml_tensor *inp_tokens_v = ggml_view_1d(compute_ctx, input_tensor_holder.inp_tokens, input.size(), 0);
     ggml_set_name(inp_tokens_v, "inp_tokens (view)");
     ggml_tensor *inpL = ggml_get_rows(compute_ctx, tensor_holder.token_embd, inp_tokens_v);
@@ -347,6 +344,7 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, Infere
 
     ggml_tensor *KQ_mask = ggml_view_2d(compute_ctx, input_tensor_holder.inp_KQ_mask, _kv_cache.n, input.size(),
                                         _kv_cache.n * ggml_type_size(input_tensor_holder.inp_KQ_mask->type), 0);
+    ggml_set_name(KQ_mask, "inp_KQ_mask (view)");
 
     LOG(INFO) << "kv_cache.n: " << _kv_cache.n;
 
