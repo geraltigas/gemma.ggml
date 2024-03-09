@@ -2,4 +2,6 @@ cmake-build-debug/
 models/
 lib/
 .idea/
-tensor_dump/
+tensor_dump/*_target
+tensor_dump/*_source
+tensor_dump/tensor_in_source_cgraph

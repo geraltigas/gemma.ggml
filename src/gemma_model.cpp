@@ -7,8 +7,10 @@
 #include <tensor_dump.h>
 
 #include <map>
+#include <algorithm>
 #include <glog/logging.h>
 #include <cmath>
+#include <fstream>
 
 int GemmaModel::load_model_from_file(const char *file_path) {
     if (file_path == nullptr) {
@@ -325,7 +327,7 @@ int GemmaModel::load_tokenizer(gguf_context *gguf_ctx) {
 
 std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, InferenceStage stage) {
     update_kv_cache();
-    CHECK_RT(load_input_tokens_to_tensor(input,stage));
+    CHECK_RT(load_input_tokens_to_tensor(input, stage));
     ggml_cgraph *cgraph = ggml_new_graph(compute_ctx);
     CHECK_PTR(cgraph);
 
@@ -335,13 +337,15 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, Infere
 //    dump_tensor("inp_pos", input_tensor_holder.inp_pos);
 //    CHECK_BOOL(compare_tensors("inp_pos"));
 
-    ggml_tensor *inp_tokens_v = ggml_view_1d(compute_ctx, input_tensor_holder.inp_tokens, DEFAULT_BATCH_SIZE, 0);
+    ggml_tensor *inp_tokens_v = ggml_view_1d(compute_ctx, input_tensor_holder.inp_tokens, input.size(), 0);
+    ggml_set_name(inp_tokens_v, "inp_tokens (view)");
     ggml_tensor *inpL = ggml_get_rows(compute_ctx, tensor_holder.token_embd, inp_tokens_v);
 
     inpL = ggml_scale(compute_ctx, inpL, sqrtf(hyper_param.n_embd));
-    ggml_tensor *inp_pos = ggml_view_1d(compute_ctx, input_tensor_holder.inp_pos, DEFAULT_TOKEN_NUM, 0);
+    ggml_tensor *inp_pos = ggml_view_1d(compute_ctx, input_tensor_holder.inp_pos, input.size(), 0);
+    ggml_set_name(inp_pos, "inp_pos (view)");
 
-    ggml_tensor *KQ_mask = ggml_view_2d(compute_ctx, input_tensor_holder.inp_KQ_mask, _kv_cache.n, DEFAULT_TOKEN_NUM,
+    ggml_tensor *KQ_mask = ggml_view_2d(compute_ctx, input_tensor_holder.inp_KQ_mask, _kv_cache.n, input.size(),
                                         _kv_cache.n * ggml_type_size(input_tensor_holder.inp_KQ_mask->type), 0);
 
     LOG(INFO) << "kv_cache.n: " << _kv_cache.n;
@@ -358,7 +362,7 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, Infere
 
             Qcur = ggml_rope_custom(
                     compute_ctx,
-                    ggml_reshape_3d(compute_ctx, Qcur, hyper_param.n_embd_heads, hyper_param.n_head, DEFAULT_TOKEN_NUM),
+                    ggml_reshape_3d(compute_ctx, Qcur, hyper_param.n_embd_heads, hyper_param.n_head, input.size()),
                     inp_pos,
                     hyper_param.n_embd_heads, DEFAULT_ROPE_TYPE, 0, hyper_param.origin_ctx_len, DEFAULT_FREQ_BASE,
                     DEFAULT_FREQ_SCALE,
@@ -369,14 +373,14 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, Infere
 
             Kcur = ggml_rope_custom(
                     compute_ctx, ggml_reshape_3d(compute_ctx, Kcur, hyper_param.n_embd_heads, hyper_param.n_head_kv,
-                                                 DEFAULT_TOKEN_NUM), inp_pos,
+                                                 input.size()), inp_pos,
                     hyper_param.n_embd_heads, DEFAULT_ROPE_TYPE, 0, hyper_param.origin_ctx_len, DEFAULT_FREQ_BASE,
                     DEFAULT_FREQ_SCALE,
                     DEFAULT_EXT_FACTOR, DEFAULT_ATTN_FACTOR, DEFAULT_BETA_FAST, DEFAULT_BETA_SLOW);
 
             cur = llm_build_kv(compute_ctx, cgraph, tensor_holder.layers[il].attn_output, Kcur, Vcur, Qcur, KQ_mask,
                                DEFAULT_CTX_NUM,
-                               DEFAULT_TOKEN_NUM, _kv_cache.head, _kv_cache.n, 1.0f, il);
+                               input.size(), _kv_cache.head, _kv_cache.n, 1.0f, il);
         }
 
         ggml_tensor *sa_out = ggml_add(compute_ctx, cur, inpL);
@@ -398,6 +402,41 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, Infere
     cur = ggml_mul_mat(compute_ctx, tensor_holder.output, cur);
 
     ggml_build_forward_expand(cgraph, cur);
+
+    auto print_all = [](ggml_cgraph *gf) {
+        auto to_file = "/home/geraltigas/Desktop/gemma.ggml/tensor_dump/tensor_in_source_cgraph";
+        std::ofstream file(to_file);
+        for (int i = 0; i < gf->n_nodes; i++) {
+            file << "node[" << i << "]: " << gf->nodes[i]->name << "\n";
+        }
+    };
+
+    print_all(cgraph);
+
+    auto check_tensor_value = [&]() {
+        ggml_tensor **tensor_in_cgraph = cgraph->nodes;
+        int num_tensor_in_cgraph = cgraph->n_nodes;
+        std::map<std::string, std::string> tensor_dump_list = get_tensor_dump_list();
+
+        for (const auto &item: tensor_dump_list) {
+            const char *name = item.first.c_str();
+            const char *tensor_name = item.second.c_str();
+            ggml_tensor *tensor = nullptr;
+            for (int i = 0; i < num_tensor_in_cgraph; i++) {
+                if (strcmp(tensor_in_cgraph[i]->name, tensor_name) == 0) {
+                    tensor = tensor_in_cgraph[i];
+                }
+            }
+            if (tensor == nullptr) {
+                LOG(ERROR) << "tensor " << tensor_name << " not found in cgraph";
+                continue;
+            }
+            dump_tensor(name, tensor);
+            compare_tensors(name);
+        }
+    };
+
+    check_tensor_value();
 
     return std::vector<token_id>();
 }
