@@ -8,6 +8,7 @@
 
 namespace app {
     int run(int argc, char* argv[]);
+    int init_glog(int /*argc*/, char* argv[]);
 }
 
 

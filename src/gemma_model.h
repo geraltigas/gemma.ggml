@@ -13,6 +13,11 @@
 #include "type.h"
 #include "ggml-backend.h"
 
+enum class InferenceStage {
+    PREFILL,
+    DECODE
+};
+
 struct GemmaLayer {
     ggml_tensor *attn_output;
     ggml_tensor *attn_k;
@@ -27,13 +32,15 @@ struct GemmaLayer {
 
 struct GemmaInputTensorHolder {
     ggml_tensor *inp_tokens;
-    ggml_tensor *inp_embd;
+//    ggml_tensor *inp_embd;
     ggml_tensor *inp_pos;
     ggml_tensor *inp_KQ_mask;
-    ggml_tensor *inp_KV_mask;
-    ggml_tensor *inp_K_shift;
-    ggml_tensor *inp_mean;
-    ggml_tensor *inp_cls;
+//    ggml_tensor *inp_KV_mask;
+//    ggml_tensor *inp_K_shift;
+//    ggml_tensor *inp_mean;
+//    ggml_tensor *inp_cls;
+    ggml_backend_buffer_type_t buffer_type = nullptr;
+    ggml_backend_buffer_t buffer = nullptr;
 };
 
 struct GemmaTensorHolder {
@@ -146,8 +153,6 @@ class GemmaModel {
     ggml_context *ggml_ctx = nullptr;
     ggml_context *compute_ctx = nullptr;
     ggml_context *kv_ctx = nullptr;
-    ggml_backend_buffer_type_t buffer_type = nullptr;
-    ggml_backend_buffer_t buffer = nullptr;
     std::vector<u8> compute_meta_buffer;
 
     HyperParam hyper_param;
@@ -176,7 +181,7 @@ public:
 
     ggml_tensor *get_tensor(const char *name);
 
-    std::vector<token_id> inference(std::vector<token_id> &input);
+    std::vector<token_id> inference(std::vector<token_id> &input, InferenceStage stage);
 
 private:
     u32 get_u32_from_kv(gguf_context *gguf_ctx, const char *key);
@@ -195,7 +200,7 @@ private:
 
     int composite_model(gguf_context *gguf_ctx);
 
-    int load_input_tokens_to_tensor(std::vector<token_id> &input);
+    int load_input_tokens_to_tensor(std::vector<token_id> &input, InferenceStage stage);
 
     int init_hyper_param(gguf_context *gguf_ctx);
 

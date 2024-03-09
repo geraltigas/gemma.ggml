@@ -11,7 +11,7 @@
 #include "macro.h"
 #include "ggml.h"
 
-int init_glog(int /*argc*/, char* argv[])
+int app::init_glog(int /*argc*/, char* argv[])
 {
     google::InitGoogleLogging(argv[0]);
     google::InstallFailureSignalHandler();

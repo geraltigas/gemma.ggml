@@ -33,9 +33,7 @@ int GemmaModel::load_model_from_file(const char *file_path) {
 //    buffer = ggml_backend_alloc_ctx_tensors_from_buft(ggml_ctx, buffer_type);
 //    CHECK_PTR(buffer);
 //    ggml_backend_buffer_set_usage(buffer, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
-//    LOG(INFO) << "Buffer size: " << ggml_backend_buffer_name(buffer) << " = "
-//              << ggml_backend_buffer_get_size(buffer) / 1024.0 / 1024.0 << " MiB";
-
+    LOG(INFO) << "model weight tensor ctx size: " << ggml_get_mem_size(ggml_ctx) / 1024.0 / 1024.0 << " MiB";
 
     // allocate cgraph mem
     compute_meta_buffer.resize(ggml_tensor_overhead() * CGRAPH_MAX_NODE_NUM + ggml_graph_overhead());
@@ -269,7 +267,7 @@ int GemmaModel::composite_model(gguf_context *gguf_ctx) {
         composited_tensor_count += 9;
     }
 
-    LOG(INFO) << "Composited " << composited_tensor_count << " tensors";
+    LOG(INFO) << "composited " << composited_tensor_count << " tensors";
 
     return 0;
 }
@@ -284,7 +282,7 @@ ggml_tensor *GemmaModel::get_tensor(const char *name) {
 
 int GemmaModel::model_warmup() {
     std::vector<token_id> warmup_prompt = {tokenizer.special_bos_id, tokenizer.special_eos_id};
-    std::vector<token_id> warmup_output = inference(warmup_prompt);
+    std::vector<token_id> warmup_output = inference(warmup_prompt, InferenceStage::PREFILL);
     if (warmup_output.empty()) {
         LOG(ERROR) << "Warmup failed";
         return -1;
@@ -293,10 +291,10 @@ int GemmaModel::model_warmup() {
 }
 
 int GemmaModel::load_tokenizer(gguf_context *gguf_ctx) {
-    tokenizer.special_bos_id = (f32) get_u32_from_kv(gguf_ctx, "tokenizer.ggml.bos_token_id");
-    tokenizer.special_eos_id = (f32) get_u32_from_kv(gguf_ctx, "tokenizer.ggml.eos_token_id");
-    tokenizer.special_unk_id = (f32) get_u32_from_kv(gguf_ctx, "tokenizer.ggml.unknown_token_id");
-    tokenizer.special_pad_id = (f32) get_u32_from_kv(gguf_ctx, "tokenizer.ggml.padding_token_id");
+    tokenizer.special_bos_id = get_u32_from_kv(gguf_ctx, "tokenizer.ggml.bos_token_id");
+    tokenizer.special_eos_id = get_u32_from_kv(gguf_ctx, "tokenizer.ggml.eos_token_id");
+    tokenizer.special_unk_id = get_u32_from_kv(gguf_ctx, "tokenizer.ggml.unknown_token_id");
+    tokenizer.special_pad_id = get_u32_from_kv(gguf_ctx, "tokenizer.ggml.padding_token_id");
     tokenizer.special_sep_id = -1;
 
     tokenizer.tokens = get_str_arr_from_kv(gguf_ctx, "tokenizer.ggml.tokens");
@@ -312,30 +310,30 @@ int GemmaModel::load_tokenizer(gguf_context *gguf_ctx) {
     // find token with bos in it
     for (const auto &token: tokenizer.tokens) {
         if (token.find("<bos>") != std::string::npos) {
-            LOG(INFO) << "Found <bos> token: " << token << " id: " << tokenizer.token_id_map[token];
+            LOG(INFO) << "found <bos> token: " << token << " id: " << tokenizer.token_id_map[token];
         }
     }
 
     // print id 2
-    LOG(INFO) << "Token id 2: " << tokenizer.tokens[2] << " type: " << tokenizer.token_type_map[tokenizer.tokens[2]];
+    LOG(INFO) << "token id 2: " << tokenizer.tokens[2] << " type: " << tokenizer.token_type_map[tokenizer.tokens[2]];
     // print id 25612
-    LOG(INFO) << "Token id 25612: " << tokenizer.tokens[25612] << " type: "
+    LOG(INFO) << "token id 25612: " << tokenizer.tokens[25612] << " type: "
               << tokenizer.token_type_map[tokenizer.tokens[25612]];
 
     return 0;
 }
 
-std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input) {
+std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, InferenceStage stage) {
     update_kv_cache();
-    CHECK_RT(load_input_tokens_to_tensor(input));
+    CHECK_RT(load_input_tokens_to_tensor(input,stage));
     ggml_cgraph *cgraph = ggml_new_graph(compute_ctx);
     CHECK_PTR(cgraph);
 
     struct ggml_tensor *cur;
-    ASSERT_MSG(input.size() > 0, "Input size must be greater than 0");
+    ASSERT_MSG(input.size() > 0, "input size must be greater than 0");
 
-//    dump_tensor("token_embd", tensor_holder.token_embd);
-//    CHECK_BOOL(compare_tensors("token_embd"))
+//    dump_tensor("inp_pos", input_tensor_holder.inp_pos);
+//    CHECK_BOOL(compare_tensors("inp_pos"));
 
     ggml_tensor *inp_tokens_v = ggml_view_1d(compute_ctx, input_tensor_holder.inp_tokens, DEFAULT_BATCH_SIZE, 0);
     ggml_tensor *inpL = ggml_get_rows(compute_ctx, tensor_holder.token_embd, inp_tokens_v);
@@ -404,10 +402,38 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input) {
     return std::vector<token_id>();
 }
 
-int GemmaModel::load_input_tokens_to_tensor(std::vector<token_id> &input) {
-    CHECK_PTR(tensor_holder.token_embd);
+int GemmaModel::load_input_tokens_to_tensor(std::vector<token_id> &input, InferenceStage stage) {
+    CHECK_PTR(input_tensor_holder.inp_tokens);
+
+    input_tensor_holder.buffer_type = ggml_backend_cpu_buffer_type();
+    input_tensor_holder.buffer = ggml_backend_alloc_ctx_tensors_from_buft(input_ctx, input_tensor_holder.buffer_type);
+    ggml_backend_buffer_clear(input_tensor_holder.buffer, 0);
+
+    // log buffer size
+    LOG(INFO) << "input buffer size: " << ggml_backend_buffer_name(input_tensor_holder.buffer) << " = "
+              << ggml_backend_buffer_get_size(input_tensor_holder.buffer) / 1024.0 / 1024.0 << " MiB";
+
     ggml_backend_tensor_set(input_tensor_holder.inp_tokens, input.data(), 0,
                             input.size() * ggml_element_size(input_tensor_holder.inp_tokens));
+
+    std::vector<i32> pos;
+
+    switch (stage) {
+        case InferenceStage::PREFILL:
+            pos.resize(input.size());
+            for (int i = 0; i < input.size(); i++) {
+                pos[i] = i;
+            }
+            break;
+        case InferenceStage::DECODE:
+            pos.resize(1);
+            pos[0] = input.size();
+            break;
+    }
+
+    CHECK_PTR(input_tensor_holder.inp_pos);
+    ggml_backend_tensor_set(input_tensor_holder.inp_pos, pos.data(), 0,
+                            pos.size() * ggml_element_size(input_tensor_holder.inp_pos));
 
     return 0;
 }
@@ -420,17 +446,18 @@ int GemmaModel::init_input_tensor() {
     };
     CHECK_PTR(input_ctx = ggml_init(init_params));
     CHECK_PTR(input_tensor_holder.inp_tokens = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_BATCH_SIZE));
-    CHECK_PTR(input_tensor_holder.inp_embd = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, hyper_param.n_embd,
-                                                                DEFAULT_BATCH_SIZE));
+//    CHECK_PTR(input_tensor_holder.inp_embd = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, hyper_param.n_embd,
+//                                                                DEFAULT_BATCH_SIZE));
     CHECK_PTR(input_tensor_holder.inp_pos = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_BATCH_SIZE));
     CHECK_PTR(input_tensor_holder.inp_KQ_mask = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, DEFAULT_CTX_NUM,
                                                                    DEFAULT_BATCH_SIZE));
-    CHECK_PTR(input_tensor_holder.inp_KV_mask = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, DEFAULT_CTX_NUM,
-                                                                   DEFAULT_BATCH_SIZE));
-    CHECK_PTR(input_tensor_holder.inp_K_shift = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_CTX_NUM));
-    CHECK_PTR(input_tensor_holder.inp_mean = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, DEFAULT_BATCH_SIZE,
-                                                                DEFAULT_BATCH_SIZE));
-    CHECK_PTR(input_tensor_holder.inp_cls = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_BATCH_SIZE));
+//    CHECK_PTR(input_tensor_holder.inp_KV_mask = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, DEFAULT_CTX_NUM,
+//                                                                   DEFAULT_BATCH_SIZE));
+//    CHECK_PTR(input_tensor_holder.inp_K_shift = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_CTX_NUM));
+//    CHECK_PTR(input_tensor_holder.inp_mean = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, DEFAULT_BATCH_SIZE,
+//                                                                DEFAULT_BATCH_SIZE));
+//    CHECK_PTR(input_tensor_holder.inp_cls = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_BATCH_SIZE));
+
 
     return 0;
 }

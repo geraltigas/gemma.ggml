@@ -4,9 +4,13 @@
 
 #include <tensor_dump.h>
 #include <glog/logging.h>
+// gtest
+#include <gtest/gtest.h>
+#include <fstream>
+#include "type.h"
 
 void dump_tensor(const char *name, const ggml_tensor *tensor) {
-    LOG(INFO) << "Dumping tensor: " << name;
+    LOG(INFO) << "dumping tensor: " << name;
     size_t byte_size = tensor->nb[3];
     // create a file with name+suffix
 #if MODE == TARGET
@@ -37,7 +41,7 @@ bool compare_tensors(const char *name) {
     // else return false
     // begin compare
     if (file_target == nullptr || file_source == nullptr) {
-        LOG(ERROR) << "Failed to open file " << file_name_target << " or " << file_name_source;
+        LOG(ERROR) << "failed to open file " << file_name_target << " or " << file_name_source;
         return false;
     }
 
@@ -52,9 +56,11 @@ bool compare_tensors(const char *name) {
     fseek(file_source, 0, SEEK_SET);
 
     if (file_size_target != file_size_source) {
-        LOG(ERROR) << "File size mismatch: " << file_size_target << " vs " << file_size_source;
+        LOG(ERROR) << "file size mismatch: " << file_size_target << " vs " << file_size_source;
         return false;
     }
+
+    LOG(INFO) << "file size: " << file_size_target;
 
     char *buffer_target = new char[file_size_target];
     char *buffer_source = new char[file_size_source];
@@ -66,13 +72,42 @@ bool compare_tensors(const char *name) {
         if (buffer_target[i] != buffer_source[i]) {
             delete[] buffer_target;
             delete[] buffer_source;
+            LOG(ERROR) << "data mismatch at index " << i;
+            LOG(ERROR) << "target: " << (int)buffer_target[i];
+            LOG(ERROR) << "source: " << (int)buffer_source[i];
             return false;
         }
     }
 
     // pass the test
-    LOG(INFO) << "Tensor: " << name << " passed the test";
+    LOG(INFO) << "tensor: " << name << " passed the test";
 
     return true;
 }
 
+std::map<std::string, std::string> get_tensor_dump_list() {
+    std::map<std::string, std::string> tensor_dump_list;
+    std::ifstream file(TENSOR_DUMP_LIST);
+    if (file.is_open()) {
+        std::string line;
+        while (std::getline(file, line)) {
+            // inp_pos:inp_pos (view)
+            // split by :
+            // the first part is the name
+            // the second part is the view
+            // and put it in map
+            size_t pos = line.find(':');
+            std::string name = line.substr(0, pos);
+            std::string view = line.substr(pos + 1);
+            tensor_dump_list[name] = view;
+        }
+    }
+    return tensor_dump_list;
+}
+
+TEST(tensor_dump, get_list) {
+    std::map<std::string, std::string> tensor_dump_list = get_tensor_dump_list();
+    for (auto &item : tensor_dump_list) {
+        LOG(INFO) << item.first << " " << item.second;
+    }
+}
