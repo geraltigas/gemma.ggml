@@ -18,15 +18,16 @@
 #define DEFAULT_BETA_SLOW 1
 #define DEFAULT_F_MAX_ALIBI_BIAS 0
 #define N_THREADS 4
+#define COMPUTE_MID_NODE_DATA_BUFFER_SIZE 0
 
 #define ON 1
 #define OFF 0
 #define SHOW 1
 #define HIDE 0
 
-#define CODE_MASK HIDE
+#define CODE_MASK SHOW
 
-#if CODE_MASK == SHOW
+#if CODE_MASK == HIDE
 #define MASK(code) code
 #else
 #define MASK(code)

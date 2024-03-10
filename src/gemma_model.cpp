@@ -38,7 +38,7 @@ int GemmaModel::load_model_from_file(const char *file_path) {
     LOG(INFO) << "model weight tensor ctx size: " << ggml_get_mem_size(ggml_ctx) / 1024.0 / 1024.0 << " MiB";
 
     // allocate cgraph mem
-    compute_meta_buffer.resize(ggml_tensor_overhead() * CGRAPH_MAX_NODE_NUM + ggml_graph_overhead());
+    compute_meta_buffer.resize((ggml_tensor_overhead() * CGRAPH_MAX_NODE_NUM + ggml_graph_overhead()) + COMPUTE_MID_NODE_DATA_BUFFER_SIZE);
 
     // init compute ctx
     struct ggml_init_params params = {
@@ -54,9 +54,9 @@ int GemmaModel::load_model_from_file(const char *file_path) {
 
     for (int i = 0; i < n_tensors; i++) {
         const char *name = gguf_get_tensor_name(gguf_ctx, i);
-//        MASK(
-//                LOG(INFO) << "Loading tensor: " << name;
-//        )
+        MASK(
+                LOG(INFO) << "Loading tensor: " << name;
+        )
         ggml_tensor *t = ggml_get_tensor(ggml_ctx, name);
 //        CHECK_PTR(t->buffer);
         tensors[name] = t;
@@ -241,7 +241,7 @@ int GemmaModel::composite_model(gguf_context *gguf_ctx) {
     int composited_tensor_count = 0;
     CHECK_PTR(tensor_holder.token_embd = get_tensor("token_embd.weight"));
     CHECK_PTR(tensor_holder.output_norm = get_tensor("output_norm.weight"));
-    CHECK_PTR(tensor_holder.output = get_tensor("output_norm.weight"));
+    CHECK_PTR(tensor_holder.output = get_tensor("token_embd.weight"));
     composited_tensor_count += 2;
     tensor_holder.layer_num = get_u32_from_kv(gguf_ctx, "gemma.block_count");
 
@@ -283,6 +283,8 @@ ggml_tensor *GemmaModel::get_tensor(const char *name) {
 }
 
 int GemmaModel::model_warmup() {
+    backend = ggml_backend_cpu_init();
+    backend_buffer_type = ggml_backend_cpu_buffer_type();
     std::vector<token_id> warmup_prompt = {tokenizer.special_bos_id, tokenizer.special_eos_id};
     std::vector<token_id> warmup_output = inference(warmup_prompt, InferenceStage::PREFILL);
     if (warmup_output.empty()) {
@@ -329,6 +331,7 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, Infere
     update_kv_cache();
     CHECK_RT(load_input_tokens_to_tensor(input, stage));
     ggml_cgraph *cgraph = ggml_new_graph(compute_ctx);
+    sched = ggml_backend_sched_new(&backend, &backend_buffer_type, 1, CGRAPH_MAX_NODE_NUM);
     CHECK_PTR(cgraph);
 
     struct ggml_tensor *cur;
@@ -408,7 +411,7 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, Infere
     ggml_set_name(result_norm, "result_norm");
     ggml_set_name(result_output, "result_output");
 
-    ggml_graph_compute_with_ctx(compute_ctx,cgraph, N_THREADS);
+    ggml_backend_sched_graph_compute(sched, cgraph);
 
     auto print_all = [](ggml_cgraph *gf) {
         auto to_file = "/home/geraltigas/Desktop/gemma.ggml/tensor_dump/tensor_in_source_cgraph";
@@ -566,7 +569,6 @@ int GemmaModel::init_kv_cache(gguf_context *gguf_ctx) {
     _kv_cache.buffer_type = ggml_backend_cpu_buffer_type();
     _kv_cache.buffer = ggml_backend_alloc_ctx_tensors_from_buft(kv_ctx, _kv_cache.buffer_type);
 //    ggml_backend_buffer_clear(buffer, 0);
-
 
     CHECK_PTR(_kv_cache.buffer);
     LOG(INFO) << "KV buffer size: " << ggml_backend_buffer_name(_kv_cache.buffer) << " = "

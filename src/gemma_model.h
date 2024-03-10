@@ -12,6 +12,7 @@
 #include <set>
 #include "type.h"
 #include "ggml-backend.h"
+#include "ggml-backend.h"
 
 enum class InferenceStage {
     PREFILL,
@@ -154,6 +155,11 @@ class GemmaModel {
     ggml_context *compute_ctx = nullptr;
     ggml_context *kv_ctx = nullptr;
     std::vector<u8> compute_meta_buffer;
+
+    ggml_backend_t backend = nullptr;
+    ggml_backend_sched_t sched = nullptr;
+    ggml_backend_buffer_type_t backend_buffer_type = nullptr;
+
 
     HyperParam hyper_param;
 
