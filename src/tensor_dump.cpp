@@ -96,6 +96,10 @@ std::map<std::string, std::string> get_tensor_dump_list() {
             // the first part is the name
             // the second part is the view
             // and put it in map
+            // begin with // is a comment, skip
+            if (line[0] == '/' && line[1] == '/') {
+                continue;
+            }
             size_t pos = line.find(':');
             std::string name = line.substr(0, pos);
             std::string view = line.substr(pos + 1);
@@ -124,6 +128,13 @@ void *load_tensor(const char *name, TensorDumpMode mode) {
     fread(buffer, file_size, 1, file);
     fclose(file);
     return buffer;
+}
+
+void dump_ptr_data(const char *name, const void *ptr, size_t size) {
+    std::string file_name = std::string(VOCAB_DUMP_DIR) + "/" + name;
+    FILE *file = fopen(file_name.c_str(), "wb");
+    fwrite(ptr, size, 1, file);
+    fclose(file);
 }
 
 TEST(tensor_dump, get_list) {

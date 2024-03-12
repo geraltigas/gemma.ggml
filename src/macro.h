@@ -25,9 +25,9 @@
 #define SHOW 1
 #define HIDE 0
 
-#define CODE_MASK SHOW
+#define CODE_MASK HIDE
 
-#if CODE_MASK == HIDE
+#if CODE_MASK == SHOW
 #define MASK(code) code
 #else
 #define MASK(code)

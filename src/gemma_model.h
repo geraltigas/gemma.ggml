@@ -61,7 +61,7 @@ struct GemmaMidTensorHolder {
 
 struct GemmaTokenizer {
     std::vector<str> tokens;
-    std::map<str, token_id> token_id_map;
+    std::vector<f32> scores;
     std::map<str, token_type> token_type_map;
 public:
     token_id special_bos_id;
@@ -187,7 +187,7 @@ public:
 
     ggml_tensor *get_tensor(const char *name);
 
-    std::vector<token_id> inference(std::vector<token_id> &input, InferenceStage stage);
+    void inference(std::vector<token_id> &input, InferenceStage stage);
 
 private:
     u32 get_u32_from_kv(gguf_context *gguf_ctx, const char *key);
@@ -217,11 +217,6 @@ private:
     ggml_tensor *get_tensor_from_meta(ggml_context *ctx, ggml_tensor *tensor);
 
     ggml_tensor *cgraph_build_norm(ggml_context *pContext, ggml_tensor *pTensor, ggml_tensor *norm);
-
-    ggml_tensor *
-    cgraph_build_kv(ggml_context *ctx, ggml_cgraph *cgraph, ggml_tensor *q_tensor, ggml_tensor *k_tensor,
-                    ggml_tensor *v_tensor,
-                    int index_layer);
 
     ggml_tensor *cgraph_build_kqv(
             struct ggml_context *ctx,
@@ -262,6 +257,8 @@ private:
 
     ggml_tensor *
     cgraph_build_ffn(ggml_context *ctx, ggml_tensor *cur, ggml_tensor *up, ggml_tensor *gate, ggml_tensor *down);
+
+    token_id greedy_sample(const ggml_tensor *model_output);
 };
 
 #endif //GEMMA_MODEL_H

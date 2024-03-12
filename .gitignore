@@ -5,3 +5,4 @@ lib/
 tensor_dump/*_target
 tensor_dump/*_source
 tensor_dump/tensor_in_source_cgraph
+vocab_dump/

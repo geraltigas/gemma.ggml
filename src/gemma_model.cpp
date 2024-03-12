@@ -196,14 +196,15 @@ std::vector<f32> GemmaModel::get_f32_array_from_kv(gguf_context *gguf_ctx, const
         const enum gguf_type arr_type = gguf_get_arr_type(gguf_ctx, kv_index[key]);
         int arr_n = gguf_get_arr_n(gguf_ctx, kv_index[key]);
         const void *data = gguf_get_arr_data(gguf_ctx, kv_index[key]);
-        for (int j = 0; j < arr_n; j++) {
-            if (arr_type == GGUF_TYPE_FLOAT32) {
+        dump_ptr_data(key, data, arr_n * ggml_type_size(GGML_TYPE_F32));
+        if (arr_type == GGUF_TYPE_FLOAT32) {
+            for (int j = 0; j < arr_n; j++) {
                 float val = static_cast<const float *>(data)[j];
                 temp.push_back(val);
-            } else {
-                LOG(ERROR) << "Not a float array";
-                CHECK_RT(-1);
             }
+        } else {
+            LOG(ERROR) << "Not a float array";
+            CHECK_RT(-1);
         }
         cache[key] = temp;
         return temp;
@@ -286,12 +287,12 @@ int GemmaModel::model_warmup() {
     backend = ggml_backend_cpu_init();
     backend_buffer_type = ggml_backend_cpu_buffer_type();
     std::vector<token_id> warmup_prompt = {tokenizer.special_bos_id, tokenizer.special_eos_id};
-    std::vector<token_id> warmup_output = inference(warmup_prompt, InferenceStage::PREFILL);
-    if (warmup_output.empty()) {
-        LOG(ERROR) << "Warmup failed";
-        return -1;
-    }
-    return 0;
+    inference(warmup_prompt, InferenceStage::PREFILL);
+//    if (warmup_prompt.empty()) {
+//        LOG(ERROR) << "Warmup failed";
+//        return -1;
+//    }
+    return -1;
 }
 
 int GemmaModel::load_tokenizer(gguf_context *gguf_ctx) {
@@ -302,19 +303,17 @@ int GemmaModel::load_tokenizer(gguf_context *gguf_ctx) {
     tokenizer.special_sep_id = -1;
 
     tokenizer.tokens = get_str_arr_from_kv(gguf_ctx, "tokenizer.ggml.tokens");
-    auto ids = get_f32_array_from_kv(gguf_ctx, "tokenizer.ggml.scores");
-    for (int i = 0; i < ids.size(); i++) {
-        tokenizer.token_id_map[tokenizer.tokens[i]] = ids[i];
-    }
+    tokenizer.scores = get_f32_array_from_kv(gguf_ctx, "tokenizer.ggml.scores");
     auto types = get_i32_array_from_kv(gguf_ctx, "tokenizer.ggml.token_type");
     for (int i = 0; i < types.size(); i++) {
         tokenizer.token_type_map[tokenizer.tokens[i]] = types[i];
     }
 
     // find token with bos in it
-    for (const auto &token: tokenizer.tokens) {
-        if (token.find("<bos>") != std::string::npos) {
-            LOG(INFO) << "found <bos> token: " << token << " id: " << tokenizer.token_id_map[token];
+    for (int i = 0; i < tokenizer.tokens.size(); i++) {
+        if (tokenizer.tokens[i].find("bos") != std::string::npos) {
+            LOG(INFO) << "bos token: " << tokenizer.tokens[i] << " id: " << i;
+            break;
         }
     }
 
@@ -324,10 +323,19 @@ int GemmaModel::load_tokenizer(gguf_context *gguf_ctx) {
     LOG(INFO) << "token id 25612: " << tokenizer.tokens[25612] << " type: "
               << tokenizer.token_type_map[tokenizer.tokens[25612]];
 
+    // open vocab dump dir
+    std::string vocab_dump_dir = std::string(VOCAB_DUMP_DIR) + "/vocab";
+    // clear file first and overwrite
+    std::ofstream vocab_dump_file(vocab_dump_dir);
+    vocab_dump_file.clear();
+    for (int i = 0; i < tokenizer.tokens.size(); i++) {
+        vocab_dump_file << tokenizer.tokens[i] << " " << tokenizer.scores[i] << " " << tokenizer.token_type_map[tokenizer.tokens[i]] << "\n";
+    }
+
     return 0;
 }
 
-std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, InferenceStage stage) {
+void GemmaModel::inference(std::vector<token_id> &input, InferenceStage stage) {
     update_kv_cache();
     CHECK_RT(load_input_tokens_to_tensor(input, stage));
     ggml_cgraph *cgraph = ggml_new_graph(compute_ctx);
@@ -448,7 +456,10 @@ std::vector<token_id> GemmaModel::inference(std::vector<token_id> &input, Infere
 
     check_tensor_value();
 
-    return std::vector<token_id>();
+//    ggml_graph_print(cgraph);
+    token_id _token_id = greedy_sample(result_output);
+    LOG(INFO) << "output token id: " << _token_id;
+    LOG(INFO) << "output token: " << tokenizer.tokens[_token_id];
 }
 
 int GemmaModel::load_input_tokens_to_tensor(std::vector<token_id> &input, InferenceStage stage) {
@@ -701,5 +712,21 @@ ggml_tensor *GemmaModel::get_tensor_from_meta(ggml_context *ctx, ggml_tensor *te
     ggml_tensor *t = ggml_dup_tensor(ctx, tensor);
     ggml_set_name(t, ggml_get_name(tensor));
     return t;
+}
+
+token_id GemmaModel::greedy_sample(const ggml_tensor *model_output) {
+    const auto *output = (const float *) model_output->data;
+    const size_t n = model_output->nb[3] / 4;
+    float max_val = -INFINITY;
+    int max_idx = -1;
+
+    for (int i = 0; i < n; i++) {
+        if (output[i] > max_val) {
+            max_val = output[i];
+            max_idx = i;
+        }
+    }
+
+    return max_idx;
 }
 
