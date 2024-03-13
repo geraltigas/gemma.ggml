@@ -7,7 +7,6 @@
 // gtest
 #include <gtest/gtest.h>
 #include <fstream>
-#include "type.h"
 
 void dump_tensor(const char *name, const ggml_tensor *tensor) {
     LOG(INFO) << "dumping tensor: " << name;
@@ -16,7 +15,7 @@ void dump_tensor(const char *name, const ggml_tensor *tensor) {
 #if MODE == TARGET
     // write tensor data to file with name_target
     // create file using std lib
-    std::string file_name = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "_target";
+    std::string file_name = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "target";
 #elif MODE == SOURCE
     // write tensor data to file with name_source
     std::string file_name = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "_source";
@@ -29,7 +28,7 @@ void dump_tensor(const char *name, const ggml_tensor *tensor) {
 
 bool compare_tensors(const char *name) {
     // read file with name_target
-    std::string file_name_target = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "_target";
+    std::string file_name_target = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "target";
     // read file with name_source
     std::string file_name_source = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "_source";
 
@@ -109,10 +108,10 @@ std::map<std::string, std::string> get_tensor_dump_list() {
     return tensor_dump_list;
 }
 
-void *load_tensor(const char *name, TensorDumpMode mode) {
+void *load_tensor(const char *name, tensor_dump_mode mode) {
     std::string file_name;
-    if (mode == TensorDumpMode::_TARGET) {
-        file_name = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "_target";
+    if (mode == tensor_dump_mode::target) {
+        file_name = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "target";
     } else {
         file_name = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "_source";
     }
@@ -145,7 +144,7 @@ TEST(tensor_dump, get_list) {
 }
 
 TEST(tensor_dump, load_tensor) {
-    float *tensor = (float *)load_tensor("inp_KQ_mask", TensorDumpMode::_TARGET);
+    float *tensor = (float *)load_tensor("inp_KQ_mask", tensor_dump_mode::target);
     for (size_t i = 0; i < 10; i++) {
         LOG(INFO) << tensor[i];
     }

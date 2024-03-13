@@ -2,7 +2,7 @@
 #define MACROS_H
 
 #include <glog/logging.h>
-#include <assert.h>
+#include <cassert>
 
 #define CGRAPH_MAX_NODE_NUM 1024
 #define DEFAULT_BATCH_SIZE 512

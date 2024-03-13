@@ -16,15 +16,15 @@
 #define SOURCE 0
 #define MODE SOURCE
 
-enum class TensorDumpMode {
-    _TARGET = 1,
-    _SOURCE = 0
+enum class tensor_dump_mode {
+    target = 1,
+    source = 0
 };
 
 void dump_tensor(const char *name, const ggml_tensor *tensor);
 bool compare_tensors(const char *name);
 std::map<std::string, std::string> get_tensor_dump_list();
-void *load_tensor(const char *name, TensorDumpMode mode);
+void *load_tensor(const char *name, tensor_dump_mode mode);
 void dump_ptr_data(const char *name, const void *ptr, size_t size);
 
 #endif //GEMMA_GGML_TENSOR_DUMP_H
