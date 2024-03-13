@@ -36,7 +36,8 @@ int app::run(int argc, char* argv[])
     auto model = std::make_unique<GemmaModel>();
     model->load_model_from_file(gguf_file_path);
     model->init_input_tensor();
-    model->model_warmup();
+//    model->model_warmup();
+    model->begin_one_round_inference();
     LOG(INFO) << "app::run";
     return 0;
 }

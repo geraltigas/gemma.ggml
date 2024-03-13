@@ -69,6 +69,9 @@ public:
     token_id special_unk_id;
     token_id special_sep_id;
     token_id special_pad_id;
+    std::string find_token(token_id id);
+    void print_tokens(std::vector<token_id> &input);
+    void print_token(token_id id);
 };
 
 
@@ -93,15 +96,13 @@ struct kv_cell {
 
 
 struct kv_cache {
-    bool has_shift = false;
-    bool do_defrag = false;
 
     // Note: The value of head isn't only used to optimize searching
     // for a free KV slot. llama_decode_internal also uses it, so it
     // cannot be freely changed after a slot has been allocated.
     uint32_t head = 0;
     uint32_t size = 0;
-    uint32_t used = 0; // used cells (i.e. at least one seq_id)
+//    uint32_t used = 0; // used cells (i.e. at least one seq_id)
 
     // computed before each graph build
     uint32_t n = 0;
@@ -189,6 +190,8 @@ public:
 
     void inference(std::vector<token_id> &input, InferenceStage stage);
 
+    void begin_one_round_inference();
+
 private:
     u32 get_u32_from_kv(gguf_context *gguf_ctx, const char *key);
 
@@ -212,9 +215,9 @@ private:
 
     int init_kv_cache(gguf_context *gguf_ctx);
 
-    int update_kv_cache();
+    int refresh_kv_cache();
 
-    ggml_tensor *get_tensor_from_meta(ggml_context *ctx, ggml_tensor *tensor);
+    int update_kv_cache(std::vector<token_id> &input, InferenceStage stage);
 
     ggml_tensor *cgraph_build_norm(ggml_context *pContext, ggml_tensor *pTensor, ggml_tensor *norm);
 
