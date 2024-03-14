@@ -33,14 +33,11 @@ int gemma_model::load_model_from_file(const char *file_path) {
     {
         int n_tensors = gguf_get_n_tensors(gguf_ctx);
         CHECK_RT(load_tensors_from_ctx(gguf_ctx, n_tensors))
+        CHECK_RT(composite_model(gguf_ctx))
     }
 
     {
         CHECK_RT(init_hyper_param(gguf_ctx))
-    }
-
-    {
-        CHECK_RT(composite_model(gguf_ctx))
     }
 
     {
@@ -204,14 +201,16 @@ ggml_tensor *gemma_model::get_tensor(const char *name) {
 int gemma_model::model_warmup() {
     backend = ggml_backend_cpu_init();
     backend_buffer_type = ggml_backend_cpu_buffer_type();
+    ggml_backend_cpu_set_n_threads(backend, N_THREADS);
+    allocr = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend));
+
     std::vector<token_id> warmup_prompt = {_tokenizer.special_bos_id, _tokenizer.special_eos_id};
-    size_t size = warmup_prompt.size();
-//    printf("%s", _tokenizer.tokens[warmup_prompt[1]].c_str());
-    inference(warmup_prompt, inference_stage::PREFILL);
-    if (warmup_prompt.size() <= size) {
-        LOG(ERROR) << "warmup failed";
-        return -1;
-    }
+    update_kv_cache(warmup_prompt, inference_stage::PREFILL);
+    ggml_cgraph *graph = build_compute_graph(warmup_prompt);
+    CHECK_PTR(graph)
+    ggml_gallocr_reserve(allocr, graph);
+    size_t mem_size =  ggml_gallocr_get_buffer_size(allocr, 0);
+    LOG(INFO) << "compute buffer size: " << (double)mem_size / 1024.0 / 1024.0 << " MiB";
     return 0;
 }
 
@@ -235,95 +234,20 @@ int gemma_model::load_tokenizer(gguf_context *gguf_ctx) {
 void gemma_model::inference(std::vector<token_id> &input, inference_stage stage) {
     update_kv_cache(input, stage);
     CHECK_RT(load_input_tokens_to_tensor(input, stage))
-    ggml_cgraph *graph = ggml_new_graph(compute_ctx);
-    sched = ggml_backend_sched_new(&backend, &backend_buffer_type, 1, CGRAPH_MAX_NODE_NUM);
-    CHECK_PTR(graph)
+    ggml_cgraph *graph = build_compute_graph(input);
+    ggml_gallocr_alloc_graph(allocr, graph);
+    ggml_backend_graph_compute(backend, graph);
+//    ggml_backend_sched_graph_compute(sched, graph);
 
-    struct ggml_tensor *cur;
-    ASSERT_MSG(!input.empty(), "input size must be greater than 0")
-
-    ggml_tensor *inp_tokens_v = ggml_view_1d(compute_ctx, _input_tensor_holder.inp_tokens, (i64)input.size(), 0);
-    ggml_set_name(inp_tokens_v, "inp_tokens (view)");
-    ggml_tensor *inpL = ggml_get_rows(compute_ctx, _tensor_holder.token_embd, inp_tokens_v);
-
-    inpL = ggml_scale(compute_ctx, inpL, sqrtf((float)_hyper_param.n_embed));
-    ggml_tensor *inp_pos = ggml_view_1d(compute_ctx, _input_tensor_holder.inp_pos, (i64)input.size(), 0);
-    ggml_set_name(inp_pos, "inp_pos (view)");
-
-    ggml_tensor *KQ_mask = ggml_view_2d(compute_ctx, _input_tensor_holder.inp_KQ_mask, _kv_cache.n, (i64)input.size(),
-                                        _kv_cache.n * ggml_type_size(_input_tensor_holder.inp_KQ_mask->type), 0);
-    ggml_set_name(KQ_mask, "inp_KQ_mask (view)");
-
-    for (int il = 0; il < _hyper_param.n_layer; ++il) {
-
-        cur = graph_build_norm(compute_ctx, inpL, _tensor_holder.layers[il].attn_norm);
-        {
-            ggml_tensor *Qcur = ggml_mul_mat(compute_ctx, _tensor_holder.layers[il].attn_q, cur);
-
-            ggml_tensor *Kcur = ggml_mul_mat(compute_ctx, _tensor_holder.layers[il].attn_k, cur);
-
-            ggml_tensor *Vcur = ggml_mul_mat(compute_ctx, _tensor_holder.layers[il].attn_v, cur);
-
-            Qcur = ggml_rope_custom(
-                    compute_ctx,
-                    ggml_reshape_3d(compute_ctx, Qcur, _hyper_param.n_embed_heads, _hyper_param.n_head, (i64)input.size()),
-                    inp_pos,
-                    (i32)_hyper_param.n_embed_heads, DEFAULT_ROPE_TYPE, 0, (i32)_hyper_param.origin_ctx_len, DEFAULT_FREQ_BASE,
-                    DEFAULT_FREQ_SCALE,
-                    DEFAULT_EXT_FACTOR, DEFAULT_ATTN_FACTOR, DEFAULT_BETA_FAST, DEFAULT_BETA_SLOW);
-
-            Qcur = ggml_scale(compute_ctx, Qcur, 1.0f / sqrtf(float(_hyper_param.n_embed_heads)));
-
-
-            Kcur = ggml_rope_custom(
-                    compute_ctx, ggml_reshape_3d(compute_ctx, Kcur, _hyper_param.n_embed_heads, _hyper_param.n_head_kv,
-                                                 (i64)input.size()), inp_pos,
-                    (i32)_hyper_param.n_embed_heads, DEFAULT_ROPE_TYPE, 0, (i32)_hyper_param.origin_ctx_len, DEFAULT_FREQ_BASE,
-                    DEFAULT_FREQ_SCALE,
-                    DEFAULT_EXT_FACTOR, DEFAULT_ATTN_FACTOR, DEFAULT_BETA_FAST, DEFAULT_BETA_SLOW);
-
-            cur = graph_build_kv(compute_ctx, graph, _tensor_holder.layers[il].attn_output, Kcur, Vcur, Qcur, KQ_mask,
-                                 DEFAULT_CTX_NUM,
-                                 (i32)input.size(), (i32)_kv_cache.head, (i32)_kv_cache.n, 1.0f, il);
-        }
-
-        ggml_tensor *sa_out = ggml_add(compute_ctx, cur, inpL);
-        cur = graph_build_norm(compute_ctx, sa_out, _tensor_holder.layers[il].ffn_norm);
-
-        {
-            cur = graph_build_ffn(compute_ctx, cur, _tensor_holder.layers[il].ffn_up,
-                                  _tensor_holder.layers[il].ffn_gate,
-                                  _tensor_holder.layers[il].ffn_down);
-        }
-        cur = ggml_add(compute_ctx, cur, sa_out);
-
-        inpL = cur;
-    }
-
-    cur = inpL;
-
-    cur = graph_build_norm(compute_ctx, cur, _tensor_holder.output_norm);
-
-    cur = ggml_mul_mat(compute_ctx, _tensor_holder.output, cur);
-
-    ggml_build_forward_expand(graph, cur);
-
-    ggml_tensor *result_output = graph->nodes[graph->n_nodes - 1];
-    ggml_tensor *result_norm = graph->nodes[graph->n_nodes - 2];
-    ggml_set_name(result_norm, "result_norm");
-    ggml_set_name(result_output, "result_output");
-
-    ggml_backend_sched_graph_compute(sched, graph);
-
-    auto print_all = [](ggml_cgraph *gf) {
-        auto to_file = "/home/geraltigas/Desktop/gemma.ggml/tensor_dump/tensor_in_source_cgraph";
-        std::ofstream file(to_file);
-        for (int i = 0; i < gf->n_nodes; i++) {
-            file << "node[" << i << "]: " << gf->nodes[i]->name << "\n";
-        }
-    };
-
-    print_all(graph);
+//    auto print_all = [](ggml_cgraph *gf) {
+//        auto to_file = "/home/geraltigas/Desktop/gemma.ggml/tensor_dump/tensor_in_source_cgraph";
+//        std::ofstream file(to_file);
+//        for (int i = 0; i < gf->n_nodes; i++) {
+//            file << "node[" << i << "]: " << gf->nodes[i]->name << "\n";
+//        }
+//    };
+//
+//    print_all(graph);
 
 //    auto check_tensor_value = [&]() {
 //        ggml_tensor **tensor_in_graph = graph->nodes;
@@ -350,21 +274,18 @@ void gemma_model::inference(std::vector<token_id> &input, inference_stage stage)
 
 //    check_tensor_value();
 
+    ggml_tensor *result_output = graph->nodes[graph->n_nodes - 1];
     token_id _token_id = greedy_sample(result_output);
 
     input.push_back(_token_id);
 }
 
-int gemma_model::load_input_tokens_to_tensor(std::vector<token_id> &input, inference_stage stage) {
+int gemma_model::load_input_tokens_to_tensor(std::vector<token_id> &input, inference_stage stage) const {
     CHECK_PTR(_input_tensor_holder.inp_tokens)
 
-    _input_tensor_holder.input_tensor_buffer_type = ggml_backend_cpu_buffer_type();
-    _input_tensor_holder.input_tensor_buffer = ggml_backend_alloc_ctx_tensors_from_buft(input_ctx, _input_tensor_holder.input_tensor_buffer_type);
-    ggml_backend_buffer_clear(_input_tensor_holder.input_tensor_buffer, 0);
-
-    // log kv_cache_buffer size
-    LOG(INFO) << "input kv_cache_buffer size: " << ggml_backend_buffer_name(_input_tensor_holder.input_tensor_buffer) << " = "
-              << (double)ggml_backend_buffer_get_size(_input_tensor_holder.input_tensor_buffer) / 1024.0 / 1024.0 << " MiB";
+//    // log kv_cache_buffer size
+//    LOG(INFO) << "input kv_cache_buffer size: " << ggml_backend_buffer_name(_input_tensor_holder.input_tensor_buffer) << " = "
+//              << (double)ggml_backend_buffer_get_size(_input_tensor_holder.input_tensor_buffer) / 1024.0 / 1024.0 << " MiB";
 
     ggml_backend_tensor_set(_input_tensor_holder.inp_tokens, input.data(), 0,
                             input.size() * ggml_element_size(_input_tensor_holder.inp_tokens));
@@ -409,7 +330,7 @@ int gemma_model::load_input_tokens_to_tensor(std::vector<token_id> &input, infer
 
 int gemma_model::init_input_tensor() {
     ggml_init_params init_params = {
-            ggml_tensor_overhead() * 8,
+            ggml_tensor_overhead() * 4,
             nullptr,
             true,
     };
@@ -418,6 +339,10 @@ int gemma_model::init_input_tensor() {
     CHECK_PTR(_input_tensor_holder.inp_tokens = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_BATCH_SIZE))
     CHECK_PTR(_input_tensor_holder.inp_pos = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_BATCH_SIZE))
     CHECK_PTR(_input_tensor_holder.inp_KQ_mask = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, DEFAULT_CTX_NUM, DEFAULT_BATCH_SIZE))
+
+    _input_tensor_holder.input_tensor_buffer_type = ggml_backend_cpu_buffer_type();
+    _input_tensor_holder.input_tensor_buffer = ggml_backend_alloc_ctx_tensors_from_buft(input_ctx, _input_tensor_holder.input_tensor_buffer_type);
+    ggml_backend_buffer_clear(_input_tensor_holder.input_tensor_buffer, 0);
 
     return 0;
 }
@@ -613,8 +538,8 @@ token_id gemma_model::greedy_sample(const ggml_tensor *model_output) {
 }
 
 void gemma_model::begin_one_round_inference() {
-    backend = ggml_backend_cpu_init();
-    backend_buffer_type = ggml_backend_cpu_buffer_type();
+    model_warmup();
+
     std::vector<token_id> input = {_tokenizer.special_bos_id, 25612};
     _tokenizer.print_tokens(input);
     u32 size = input.size();
@@ -702,17 +627,97 @@ int gemma_model::load_header_kv_pair_from_ctx(gguf_context *gguf_ctx, int n_kv_p
     return 0;
 }
 
-int gemma_model::init_compute_graph_context() {
-    // allocate graph mem
-    compute_meta_buffer.resize(ggml_tensor_overhead() * CGRAPH_MAX_NODE_NUM + ggml_graph_overhead() + COMPUTE_MID_NODE_DATA_BUFFER_SIZE);
-    // init compute ctx
-    struct ggml_init_params params = {
-            compute_meta_buffer.size(),
-            compute_meta_buffer.data(),
+int gemma_model::reset_compute_context() {
+    static u32 mem_size = ggml_tensor_overhead() * CGRAPH_MAX_NODE_NUM + ggml_graph_overhead() + COMPUTE_MID_NODE_DATA_BUFFER_SIZE;
+    static void *compute_context_buffer = malloc(mem_size);
+
+    ggml_free(compute_ctx);
+    ggml_init_params params = {
+            mem_size,
+            compute_context_buffer,
             true,
     };
     compute_ctx = ggml_init(params);
     return 0;
+}
+
+ggml_cgraph *gemma_model::build_compute_graph(std::vector<token_id> &input) {
+    reset_compute_context(); // only for tensor node reference, not for tensor data
+    ggml_cgraph *graph = ggml_new_graph(compute_ctx);
+    CHECK_PTR(graph)
+
+    struct ggml_tensor *cur;
+    ASSERT_MSG(!input.empty(), "input size must be greater than 0")
+
+    ggml_tensor *inp_tokens_v = ggml_view_1d(compute_ctx, _input_tensor_holder.inp_tokens, (i64)input.size(), 0);
+    ggml_set_name(inp_tokens_v, "inp_tokens (view)");
+    ggml_tensor *inpL = ggml_get_rows(compute_ctx, _tensor_holder.token_embd, inp_tokens_v);
+
+    inpL = ggml_scale(compute_ctx, inpL, sqrtf((float)_hyper_param.n_embed));
+    ggml_tensor *inp_pos = ggml_view_1d(compute_ctx, _input_tensor_holder.inp_pos, (i64)input.size(), 0);
+    ggml_set_name(inp_pos, "inp_pos (view)");
+
+    ggml_tensor *KQ_mask = ggml_view_2d(compute_ctx, _input_tensor_holder.inp_KQ_mask, _kv_cache.n, (i64)input.size(),
+                                        _kv_cache.n * ggml_type_size(_input_tensor_holder.inp_KQ_mask->type), 0);
+    ggml_set_name(KQ_mask, "inp_KQ_mask (view)");
+
+    for (int il = 0; il < _hyper_param.n_layer; ++il) {
+
+        cur = graph_build_norm(compute_ctx, inpL, _tensor_holder.layers[il].attn_norm);
+        {
+            ggml_tensor *Qcur = ggml_mul_mat(compute_ctx, _tensor_holder.layers[il].attn_q, cur);
+
+            ggml_tensor *Kcur = ggml_mul_mat(compute_ctx, _tensor_holder.layers[il].attn_k, cur);
+
+            ggml_tensor *Vcur = ggml_mul_mat(compute_ctx, _tensor_holder.layers[il].attn_v, cur);
+
+            Qcur = ggml_rope_custom(
+                    compute_ctx,
+                    ggml_reshape_3d(compute_ctx, Qcur, _hyper_param.n_embed_heads, _hyper_param.n_head, (i64)input.size()),
+                    inp_pos,
+                    (i32)_hyper_param.n_embed_heads, DEFAULT_ROPE_TYPE, 0, (i32)_hyper_param.origin_ctx_len, DEFAULT_FREQ_BASE,
+                    DEFAULT_FREQ_SCALE,
+                    DEFAULT_EXT_FACTOR, DEFAULT_ATTN_FACTOR, DEFAULT_BETA_FAST, DEFAULT_BETA_SLOW);
+
+            Qcur = ggml_scale(compute_ctx, Qcur, 1.0f / sqrtf(float(_hyper_param.n_embed_heads)));
+
+
+            Kcur = ggml_rope_custom(
+                    compute_ctx, ggml_reshape_3d(compute_ctx, Kcur, _hyper_param.n_embed_heads, _hyper_param.n_head_kv,
+                                                 (i64)input.size()), inp_pos,
+                    (i32)_hyper_param.n_embed_heads, DEFAULT_ROPE_TYPE, 0, (i32)_hyper_param.origin_ctx_len, DEFAULT_FREQ_BASE,
+                    DEFAULT_FREQ_SCALE,
+                    DEFAULT_EXT_FACTOR, DEFAULT_ATTN_FACTOR, DEFAULT_BETA_FAST, DEFAULT_BETA_SLOW);
+
+            cur = graph_build_kv(compute_ctx, graph, _tensor_holder.layers[il].attn_output, Kcur, Vcur, Qcur, KQ_mask,
+                                 DEFAULT_CTX_NUM,
+                                 (i32)input.size(), (i32)_kv_cache.head, (i32)_kv_cache.n, 1.0f, il);
+        }
+
+        ggml_tensor *sa_out = ggml_add(compute_ctx, cur, inpL);
+        cur = graph_build_norm(compute_ctx, sa_out, _tensor_holder.layers[il].ffn_norm);
+
+        {
+            cur = graph_build_ffn(compute_ctx, cur, _tensor_holder.layers[il].ffn_up,
+                                  _tensor_holder.layers[il].ffn_gate,
+                                  _tensor_holder.layers[il].ffn_down);
+        }
+        cur = ggml_add(compute_ctx, cur, sa_out);
+
+        inpL = cur;
+    }
+
+    cur = inpL;
+
+    cur = graph_build_norm(compute_ctx, cur, _tensor_holder.output_norm);
+
+    cur = ggml_mul_mat(compute_ctx, _tensor_holder.output, cur);
+
+    ggml_build_forward_expand(graph, cur);
+
+    ggml_tensor *result_output = graph->nodes[graph->n_nodes - 1];
+    ggml_set_name(result_output, "result_output");
+    return graph;
 }
 
 std::string gemma_tokenizer::find_token(token_id id) {

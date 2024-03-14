@@ -110,6 +110,7 @@ class gemma_model {
 
     // backend
     ggml_backend_t backend = nullptr;
+    ggml_gallocr_t allocr = nullptr;
     ggml_backend_sched_t sched = nullptr;
     ggml_backend_buffer_type_t backend_buffer_type = nullptr;
 
@@ -124,7 +125,6 @@ class gemma_model {
 
     // compute graph context
     ggml_context *compute_ctx = nullptr;
-    std::vector<u8> compute_meta_buffer;
 
     // kv cache context
     ggml_context *kv_ctx = nullptr;
@@ -145,10 +145,7 @@ public:
     int load_model_from_file(const char *file_path);
 
     // init
-    int init_compute_graph_context();
-
     int init_input_tensor();
-
     int init_kv_cache();
 
 private:
@@ -166,11 +163,15 @@ private:
     // inference
     int model_warmup();
 
-    int load_input_tokens_to_tensor(std::vector<token_id> &input, inference_stage stage);
+    ggml_cgraph *build_compute_graph(std::vector<token_id> &input);
+
+    int load_input_tokens_to_tensor(std::vector<token_id> &input, inference_stage stage) const;
 
     int refresh_kv_cache();
 
     int update_kv_cache(std::vector<token_id> &input, [[maybe_unused]] inference_stage stage);
+
+    int reset_compute_context();
 
     static token_id greedy_sample(const ggml_tensor *model_output);
 

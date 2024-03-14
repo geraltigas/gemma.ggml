@@ -24,3 +24,40 @@ llama.cpp:1972
 
 llama.cpp:7960
 
+### tensor, context and buffer
+
+tensor: **reference** and **data**
+context: store the reference
+buffer: store the data
+
+allocate tensor references in context first, then allocate buffer(actual data) for tensor references
+
+### all tensors related and their classification
+
+- **model weight tensors**: load from file, no buffer. once allocated, no change. context: **weight_ctx**
+- **input tensors**: create manually, init with 0, with buffer. once allocated, no reallocate. context: **input_ctx**
+- **kv cache tensors**: create manually, with buffer. once allocated, no reallocate. context: **kv_ctx**
+- **mid-inference tensors**: create automatically, with buffer. reallocate during each inference. context: none
+
+### how to allocate tensor
+
+1. create a ctx with enough tensor overhead space: tensor_num * ggml_tensor_overhead()
+2. create a buffer and allocate tensor data in the buffer
+3. (optional) init buffer data with 0
+
+```cpp
+    ggml_init_params init_params = {
+            ggml_tensor_overhead() * 4,
+            nullptr,
+            true,
+    };
+
+    CHECK_PTR(input_ctx = ggml_init(init_params))
+    CHECK_PTR(_input_tensor_holder.inp_tokens = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_BATCH_SIZE))
+    CHECK_PTR(_input_tensor_holder.inp_pos = ggml_new_tensor_1d(input_ctx, GGML_TYPE_I32, DEFAULT_BATCH_SIZE))
+    CHECK_PTR(_input_tensor_holder.inp_KQ_mask = ggml_new_tensor_2d(input_ctx, GGML_TYPE_F32, DEFAULT_CTX_NUM, DEFAULT_BATCH_SIZE))
+
+    _input_tensor_holder.input_tensor_buffer_type = ggml_backend_cpu_buffer_type();
+    _input_tensor_holder.input_tensor_buffer = ggml_backend_alloc_ctx_tensors_from_buft(input_ctx, _input_tensor_holder.input_tensor_buffer_type);
+    ggml_backend_buffer_clear(_input_tensor_holder.input_tensor_buffer, 0);
+```

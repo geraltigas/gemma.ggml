@@ -25,10 +25,9 @@ int app::run(int argc, char* argv[])
     CHECK_RT_MSG(init_glog(argc, argv), "Failed to init glog")
     const char * gguf_file_path = "../models/gemma-2b-it-q4_k_m.gguf";
     auto model = std::make_unique<gemma_model>();
-    model->load_model_from_file(gguf_file_path);
-    model->init_compute_graph_context();
-    model->init_kv_cache();
-    model->init_input_tensor();
+    model->load_model_from_file(gguf_file_path); // init weight etc
+    model->init_input_tensor(); //  init input tensor
+    model->init_kv_cache(); // init kv cache tensor
     model->begin_one_round_inference();
     LOG(INFO) << "app::run";
     return 0;

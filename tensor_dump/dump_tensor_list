@@ -1,5 +1,4 @@
 inp_pos:inp_pos (view)
 inp_tokens:inp_tokens (view)
 inp_KQ_mask:inp_KQ_mask (view)
-result_norm:result_norm
 result_output:result_output
