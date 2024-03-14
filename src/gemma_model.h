@@ -108,12 +108,6 @@ class gemma_model {
     // hyper param
     hyper_param _hyper_param;
 
-    // backend
-    ggml_backend_t backend = nullptr;
-    ggml_gallocr_t allocr = nullptr;
-    ggml_backend_sched_t sched = nullptr;
-    ggml_backend_buffer_type_t backend_buffer_type = nullptr;
-
     // input tensor context
     ggml_context *input_ctx = nullptr;
     gemma_input_tensor_holder _input_tensor_holder;

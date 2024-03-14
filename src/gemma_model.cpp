@@ -199,18 +199,10 @@ ggml_tensor *gemma_model::get_tensor(const char *name) {
 }
 
 int gemma_model::model_warmup() {
-    backend = ggml_backend_cpu_init();
-    backend_buffer_type = ggml_backend_cpu_buffer_type();
-    ggml_backend_cpu_set_n_threads(backend, N_THREADS);
-    allocr = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend));
-
     std::vector<token_id> warmup_prompt = {_tokenizer.special_bos_id, _tokenizer.special_eos_id};
     update_kv_cache(warmup_prompt, inference_stage::PREFILL);
     ggml_cgraph *graph = build_compute_graph(warmup_prompt);
     CHECK_PTR(graph)
-    ggml_gallocr_reserve(allocr, graph);
-    size_t mem_size =  ggml_gallocr_get_buffer_size(allocr, 0);
-    LOG(INFO) << "compute buffer size: " << (double)mem_size / 1024.0 / 1024.0 << " MiB";
     return 0;
 }
 
@@ -235,8 +227,7 @@ void gemma_model::inference(std::vector<token_id> &input, inference_stage stage)
     update_kv_cache(input, stage);
     CHECK_RT(load_input_tokens_to_tensor(input, stage))
     ggml_cgraph *graph = build_compute_graph(input);
-    ggml_gallocr_alloc_graph(allocr, graph);
-    ggml_backend_graph_compute(backend, graph);
+    ggml_graph_compute_with_ctx(compute_ctx, graph, N_THREADS);
 //    ggml_backend_sched_graph_compute(sched, graph);
 
 //    auto print_all = [](ggml_cgraph *gf) {
@@ -538,8 +529,6 @@ token_id gemma_model::greedy_sample(const ggml_tensor *model_output) {
 }
 
 void gemma_model::begin_one_round_inference() {
-    model_warmup();
-
     std::vector<token_id> input = {_tokenizer.special_bos_id, 25612};
     _tokenizer.print_tokens(input);
     u32 size = input.size();
@@ -635,7 +624,7 @@ int gemma_model::reset_compute_context() {
     ggml_init_params params = {
             mem_size,
             compute_context_buffer,
-            true,
+            false,
     };
     compute_ctx = ggml_init(params);
     return 0;
