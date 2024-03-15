@@ -8,15 +8,18 @@
 #include <memory>
 #include <macro.h>
 
-int app::init_glog(int /*argc*/, char* argv[])
+#define LOG_DIR "/home/geraltigas/Desktop/gemma.ggml/log"
+
+int app::init_glog(int argc, char* argv[])
 {
+    google::ParseCommandLineFlags(&argc, &argv, true);
+    FLAGS_log_dir = LOG_DIR;
     google::InitGoogleLogging(argv[0]);
     google::InstallFailureSignalHandler();
     google::InstallFailureWriter([](const char* data, int size) {
         std::cerr.write(data, size);
     });
     // set log level
-    FLAGS_stderrthreshold = google::INFO;
     return 0;
 }
 

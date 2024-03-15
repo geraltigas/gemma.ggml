@@ -26,9 +26,13 @@ void dump_tensor(const char *name, const ggml_tensor *tensor) {
     fclose(file);
 }
 
+void dump_tensor(std::string name, const ggml_tensor *tensor) {
+    dump_tensor(name.c_str(), tensor);
+}
+
 bool compare_tensors(const char *name) {
     // read file with name_target
-    std::string file_name_target = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "target";
+    std::string file_name_target = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "_target";
     // read file with name_source
     std::string file_name_source = std::string(DEFAULT_TENSOR_DUMP_DIR) + "/" + name + "_source";
 
@@ -55,11 +59,11 @@ bool compare_tensors(const char *name) {
     fseek(file_source, 0, SEEK_SET);
 
     if (file_size_target != file_size_source) {
-        LOG(ERROR) << "file size mismatch: " << file_size_target << " vs " << file_size_source;
+        LOG(ERROR) << "file size mismatch: (target)" << file_size_target << " vs (source)" << file_size_source;
         return false;
     }
 
-    LOG(INFO) << "file size: " << file_size_target;
+//    LOG(INFO) << "file size: " << file_size_target;
 
     char *buffer_target = new char[file_size_target];
     char *buffer_source = new char[file_size_source];
@@ -82,6 +86,10 @@ bool compare_tensors(const char *name) {
     LOG(INFO) << "tensor: " << name << " passed the test";
 
     return true;
+}
+
+bool compare_tensors(std::string name) {
+    return compare_tensors(name.c_str());
 }
 
 std::map<std::string, std::string> get_tensor_dump_list() {

@@ -157,7 +157,7 @@ private:
     // inference
     int model_warmup();
 
-    ggml_cgraph *build_compute_graph(std::vector<token_id> &input);
+    ggml_cgraph *build_compute_graph(std::vector<token_id> &input, inference_stage stage);
 
     int load_input_tokens_to_tensor(std::vector<token_id> &input, inference_stage stage) const;
 
