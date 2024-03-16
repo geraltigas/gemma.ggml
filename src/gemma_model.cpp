@@ -10,6 +10,7 @@
 #include <glog/logging.h>
 #include <cmath>
 #include <fstream>
+#include <chrono>
 
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "ConstantParameter"
@@ -556,15 +557,29 @@ void gemma_model::begin_one_round_inference() {
     std::vector<token_id> input = {_tokenizer.special_bos_id, 25612};
     _tokenizer.print_tokens(input);
     u32 size = input.size();
+    auto prefill_start = std::chrono::high_resolution_clock::now();
     inference(input, inference_stage::PREFILL);
+    auto prefill_end = std::chrono::high_resolution_clock::now();
+
     if (input.size() <= size) {
         LOG(ERROR) << "inference failed";
     }
+    auto decode_start = std::chrono::high_resolution_clock::now();
     while (input[input.size() - 1] != _tokenizer.special_eos_id && input.size() < DEFAULT_TOKEN_NUM){
         _tokenizer.print_token(input, input.size() - 1);
         inference(input, inference_stage::DECODE);
     }
+    auto decode_end = std::chrono::high_resolution_clock::now();
     _tokenizer.print_token(input, input.size() - 1);
+
+    auto prefill_time = std::chrono::duration_cast<std::chrono::milliseconds>(prefill_end - prefill_start).count();
+    auto decode_time = std::chrono::duration_cast<std::chrono::milliseconds>(decode_end - decode_start).count();
+
+    LOG(INFO) << "prefill time: " << prefill_time << "ms.";
+    LOG(INFO) << (double) size / prefill_time * 1000 << " tokens/s";
+    LOG(INFO) << "decode time: " << decode_time << "ms.";
+    LOG(INFO) << (double) (input.size() - size) / decode_time * 1000 << " tokens/s";
+
     LOG(INFO) << "inference finished";
 }
 
