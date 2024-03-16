@@ -11,7 +11,6 @@ include_directories(src)
 add_executable(gemma_ggml main.cpp ${SOURCES})
 add_executable(run_tests test_main.cpp ${SOURCES})
 
-
 find_package(glog REQUIRED)
 find_package(GTest REQUIRED)
 # create a string to hold all lib

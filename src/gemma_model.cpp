@@ -413,15 +413,16 @@ int gemma_model::init_hyper_param(gguf_context *gguf_ctx) {
 static int32_t kv_cache_cell_max(const struct kv_cache &cache) {
     for (uint32_t i = cache.size - 1; i > 0; --i) {
         if (cache.cells[i].pos >= 0 && !cache.cells[i].seq_id.empty()) {
+            printf("kv_cache_cell_max: %d\n", i);
+            fflush(stdout);
             return (i32) i + 1;
         }
     }
-
     return 0;
 }
 
 int gemma_model::update_kv_cache(std::vector<token_id> &input, [[maybe_unused]] inference_stage stage) {
-    _kv_cache.n = std::min((int32_t) DEFAULT_CTX_NUM, std::max(32, GGML_PAD(kv_cache_cell_max(_kv_cache), 32)));
+    _kv_cache.n = std::min((int32_t) DEFAULT_CTX_NUM, ((i32)((input.size()) / 32) + 1) * 32);
     if (stage == inference_stage::PREFILL) {
         _kv_cache.head = 0;
     } else {
@@ -559,10 +560,11 @@ void gemma_model::begin_one_round_inference() {
     if (input.size() <= size) {
         LOG(ERROR) << "inference failed";
     }
-    while (input[input.size() - 1] != _tokenizer.special_eos_id && input.size() < 20){
-        _tokenizer.print_token(input[input.size() - 1]);
+    while (input[input.size() - 1] != _tokenizer.special_eos_id && input.size() < DEFAULT_TOKEN_NUM){
+        _tokenizer.print_token(input, input.size() - 1);
         inference(input, inference_stage::DECODE);
     }
+    _tokenizer.print_token(input, input.size() - 1);
     LOG(INFO) << "inference finished";
 }
 
@@ -744,14 +746,19 @@ std::string gemma_tokenizer::find_token(token_id id) {
 }
 
 void gemma_tokenizer::print_tokens(std::vector<token_id> &input) {
-    for (int i = 1; i < input.size(); i++) {
+    for (int i = 0; i < input.size(); i++) {
         printf("%s", tokens[input[i]].c_str());
     }
+    fflush(stdout);
 }
 
 void gemma_tokenizer::print_token(token_id id) {
     printf("%s", tokens[id].c_str());
-    // flush stdout
+    fflush(stdout);
+}
+
+void gemma_tokenizer::print_token(std::vector<token_id> &input, u32 index) {
+    printf("%s", tokens[input[index]].c_str());
     fflush(stdout);
 }
 

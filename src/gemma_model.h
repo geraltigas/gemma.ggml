@@ -65,6 +65,8 @@ public:
     void print_tokens(std::vector<token_id> &input);
 
     void print_token(token_id id);
+
+    void print_token(std::vector<token_id> &input, u32 index);
 };
 
 
@@ -140,6 +142,7 @@ public:
 
     // init
     int init_input_tensor();
+
     int init_kv_cache();
 
 private:
