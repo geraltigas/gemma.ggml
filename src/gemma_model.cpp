@@ -537,19 +537,6 @@ token_id gemma_model::greedy_sample(const ggml_tensor *model_output) {
         }
     }
 
-//    auto print_top_k_logits = [&](size_t k) {
-//        std::vector<std::pair<float, int>> logits_;
-//        for (int i = 0; i < n; i++) {
-//            logits_.emplace_back(logits[i], i);
-//        }
-////        std::sort(logits.begin(), logits.end(), std::greater<>());
-//        for (int i = 0; i < k; i++) {
-//            LOG(INFO) << "logit " << i << ": " << logits_[i].first << " token id: " << logits_[i].second;
-//        }
-//    };
-//
-//    print_top_k_logits(10);
-
     return max_idx;
 }
 
@@ -570,7 +557,6 @@ void gemma_model::begin_one_round_inference() {
         inference(input, inference_stage::DECODE);
     }
     auto decode_end = std::chrono::high_resolution_clock::now();
-    _tokenizer.print_token(input, input.size() - 1);
 
     auto prefill_time = std::chrono::duration_cast<std::chrono::milliseconds>(prefill_end - prefill_start).count();
     auto decode_time = std::chrono::duration_cast<std::chrono::milliseconds>(decode_end - decode_start).count();
@@ -760,20 +746,38 @@ std::string gemma_tokenizer::find_token(token_id id) {
     return tokens[id];
 }
 
-void gemma_tokenizer::print_tokens(std::vector<token_id> &input) {
-    for (int i = 0; i < input.size(); i++) {
-        printf("%s", tokens[input[i]].c_str());
+void remove_wunderline(std::string &tstring) {
+    static const std::string underline = "▁";
+    // erase
+    size_t pos = 0;
+    while ((pos = tstring.find(underline, pos)) != std::string::npos) {
+        tstring.replace(pos, underline.length(), " ");
     }
+}
+
+void gemma_tokenizer::print_tokens(std::vector<token_id> &input) {
+    std::string temp;
+    for (int i = 0; i < input.size(); i++) {
+        temp += tokens[input[i]];
+    }
+    temp.replace(temp.find("<bos>"), 5, "");
+    // replace all ▁ with space
+    remove_wunderline(temp);
+    printf("%s", temp.c_str());
     fflush(stdout);
 }
 
 void gemma_tokenizer::print_token(token_id id) {
-    printf("%s", tokens[id].c_str());
+    std::string temp(tokens[id]);
+    remove_wunderline(temp);
+    printf("%s", temp.c_str());
     fflush(stdout);
 }
 
 void gemma_tokenizer::print_token(std::vector<token_id> &input, u32 index) {
-    printf("%s", tokens[input[index]].c_str());
+    std::string temp(tokens[input[index]]);
+    remove_wunderline(temp);
+    printf("%s", temp.c_str());
     fflush(stdout);
 }
 

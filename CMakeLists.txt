@@ -1,12 +1,13 @@
 cmake_minimum_required(VERSION 3.25)
 project(gemma_ggml)
 
+include_directories(src)
+
 add_subdirectory(lib)
 
 set(CMAKE_CXX_STANDARD 17)
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
-include_directories(src)
 
 add_executable(gemma_ggml main.cpp ${SOURCES})
 add_executable(run_tests test_main.cpp ${SOURCES})
