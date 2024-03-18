@@ -21,6 +21,8 @@ void start_recording(const char *name);
 
 void stop_recording(const char *name);
 
+void add_count(const char *name);
+
 void print_profiling_result(void);
 
 #ifdef __cplusplus
