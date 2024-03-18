@@ -126,4 +126,5 @@ void print_profiling_result() {
     std::cout << std::endl;
     print_prefix("op");
     print_prefix("mul_mat");
+    print_prefix("mmstage");
 }

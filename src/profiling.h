@@ -5,11 +5,10 @@
 #ifndef GEMMA_GGML_PROFILING_H
 #define GEMMA_GGML_PROFILING_H
 
-#define profile(str, code) { \
+#define profile(str, code) \
     start_recording(str); \
     code; \
     stop_recording(str); \
-}
 
 #ifdef __cplusplus
 extern "C" {
