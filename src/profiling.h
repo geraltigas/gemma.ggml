@@ -5,7 +5,7 @@
 #ifndef GEMMA_GGML_PROFILING_H
 #define GEMMA_GGML_PROFILING_H
 
-#define ENABLE_PROFILING 0
+#define ENABLE_PROFILING 1
 
 #if ENABLE_PROFILING
 #define profile(str, code) start_recording(str); code; stop_recording(str);

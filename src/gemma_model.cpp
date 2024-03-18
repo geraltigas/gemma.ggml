@@ -231,7 +231,7 @@ void gemma_model::inference(std::vector<token_id> &input, inference_stage stage)
     update_kv_cache(input, stage);
     CHECK_RT(load_input_tokens_to_tensor(input, stage))
     ggml_cgraph *graph = build_compute_graph(input, stage);
-    ggml_graph_compute_with_ctx(compute_ctx, graph, N_THREADS);
+    ggml_graph_compute_with_ctx(compute_ctx, graph, N_THREADS_FOR_GGML);
 
 //
 //    auto print_all = [](ggml_cgraph *gf) {

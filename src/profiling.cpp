@@ -125,6 +125,6 @@ void print_profiling_result() {
     check_profiler();
     std::cout << std::endl;
     print_prefix("op");
-    print_prefix("mul_mat");
-    print_prefix("mmstage");
+//    print_prefix("mul_mat");
+//    print_prefix("mmstage");
 }
