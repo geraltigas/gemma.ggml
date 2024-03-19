@@ -222,6 +222,8 @@ int gemma_model::load_tokenizer(gguf_context *gguf_ctx) {
         _tokenizer.token_type_map[_tokenizer.tokens[i]] = types[i];
     }
 
+    _tokenizer.find_token_id("hello");
+
     return 0;
 }
 
@@ -779,6 +781,16 @@ void gemma_tokenizer::print_token(std::vector<token_id> &input, u32 index) {
     remove_wunderline(temp);
     printf("%s", temp.c_str());
     fflush(stdout);
+}
+
+token_id gemma_tokenizer::find_token_id(const std::string &token) {
+    for (int i = 0; i < tokens.size(); i++) {
+        if (tokens[i] == token) {
+            LOG(INFO) << "token :" << token << " found at " << i;
+            return i;
+        }
+    }
+    return -1;
 }
 
 #pragma clang diagnostic pop

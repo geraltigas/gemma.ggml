@@ -67,6 +67,8 @@ public:
     void print_token(token_id id);
 
     void print_token(std::vector<token_id> &input, u32 index);
+
+    token_id find_token_id(const std::string &token);
 };
 
 
