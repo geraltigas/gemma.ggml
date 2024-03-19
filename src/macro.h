@@ -20,6 +20,9 @@
 #define N_THREADS_FOR_GGML 1
 #define N_THREADS_MUL_MAT_CPU 1
 #define COMPUTE_MID_NODE_DATA_BUFFER_SIZE (128u * 1024 * 1024)
+#define OPENCL_PLATFORM_NAME "Intel(R) OpenCL HD Graphics"
+#define OPENCL_DEVICE_NAME "Intel(R) UHD Graphics [0x9bc4]"
+#define OPENCL_KERNELS_FILE "/home/geraltigas/Desktop/gemma.ggml/src/kernals.cl"
 
 #define ON 1
 #define OFF 0
