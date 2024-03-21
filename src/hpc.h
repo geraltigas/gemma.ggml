@@ -19,8 +19,7 @@ extern "C" {
 
 #include "ggml.h"
 
-void mul_mat(int64_t block,
-             int64_t ne01, int64_t ne11, int64_t ne12,
+void mul_mat(int64_t ne01, int64_t ne11, int64_t ne12,
              int64_t nb01,
              int64_t ne1,
              int64_t nb1, int64_t nb2,

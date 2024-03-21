@@ -8,6 +8,8 @@
 #include <tuple>
 #include <CL/cl.h>
 
+extern size_t max_work_group_size;
+
 int init_opencl();
 void print_opencl_info();
 void print_now_using(cl_platform_id platform, cl_device_id device);

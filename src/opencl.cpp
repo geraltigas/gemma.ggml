@@ -31,6 +31,7 @@ const char* platform_name = OPENCL_PLATFORM_NAME;
 //"NVIDIA CUDA";
 const char* device_name = OPENCL_DEVICE_NAME;
 const char* kernels_file = OPENCL_KERNELS_FILE;
+size_t max_work_group_size;
 void print_platforms() {
     LOG(INFO) << "OpenCL Platforms:" << std::endl;
     cl_int err;
@@ -90,8 +91,10 @@ void print_now_using(cl_platform_id platform, cl_device_id device) {
     char _device_name[128];
     clGetPlatformInfo(platform, CL_PLATFORM_NAME, 128, _platform_name, nullptr);
     clGetDeviceInfo(device, CL_DEVICE_NAME, 128, _device_name, nullptr);
+    clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(max_work_group_size), &max_work_group_size, NULL);
     LOG(INFO) << "Platform: " << _platform_name << std::endl;
     LOG(INFO) << "Device: " << _device_name << std::endl;
+    LOG(INFO) << "Max work group size: " << max_work_group_size << std::endl;
 }
 
 void print_now_using() {

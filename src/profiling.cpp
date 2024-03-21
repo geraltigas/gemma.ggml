@@ -20,7 +20,7 @@ public:
     std::map<std::string, uint32_t> _call_count;
     std::map<std::string, uint32_t> call_count;
 
-    void start_recording(const std::string &name) {
+    void _start_recording(const std::string &name) {
         if (start_time.find(name) != start_time.end()) {
             std::cerr << "profiling: " << name << " already exists" << std::endl;
             exit(1);
@@ -39,7 +39,7 @@ public:
         }
     }
 
-    void stop_recording(const std::string &name) {
+    void _stop_recording(const std::string &name) {
         if (start_time.find(name) == start_time.end()) {
             std::cerr << "profiling: " << name << " not found" << std::endl;
             exit(1);
@@ -51,7 +51,7 @@ public:
         start_time.erase(name);
     }
 
-    void add_count(const std::string &name) {
+    void _add_count(const std::string &name) {
         if (call_count.find(name) == call_count.end()) {
             call_count[name] = 0;
         }
@@ -71,7 +71,7 @@ void check_profiler() {
     }
 }
 
-int init_profiling() {
+int _init_profiling() {
     if (profiler != nullptr) {
         return 0;
     }
@@ -79,19 +79,19 @@ int init_profiling() {
     return 0;
 }
 
-void add_count(const char *name) {
+void _add_count(const char *name) {
     check_profiler();
-    profiler->add_count(name);
+    profiler->_add_count(name);
 }
 
-void start_recording(const char *name) {
+void _start_recording(const char *name) {
     check_profiler();
-    profiler->start_recording(name);
+    profiler->_start_recording(name);
 }
 
-void stop_recording(const char *name) {
+void _stop_recording(const char *name) {
     check_profiler();
-    profiler->stop_recording(name);
+    profiler->_stop_recording(name);
 }
 
 void print_prefix(const char *name) {
@@ -121,10 +121,15 @@ void print_prefix(const char *name) {
 
 }
 
-void print_profiling_result() {
+void _print_profiling_result() {
     check_profiler();
     std::cout << std::endl;
     print_prefix("op");
 //    print_prefix("mul_mat");
 //    print_prefix("mmstage");
+    // print call count
+    std::cout << "----------------- call count -----------------" << std::endl;
+    for (auto &record: profiler->call_count) {
+        std::cout << record.first << ": " << record.second << std::endl;
+    }
 }

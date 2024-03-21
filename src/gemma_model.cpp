@@ -766,21 +766,18 @@ void gemma_tokenizer::print_tokens(std::vector<token_id> &input) {
     // replace all ▁ with space
     remove_wunderline(temp);
     printf("%s", temp.c_str());
-    fflush(stdout);
 }
 
 void gemma_tokenizer::print_token(token_id id) {
     std::string temp(tokens[id]);
     remove_wunderline(temp);
     printf("%s", temp.c_str());
-    fflush(stdout);
 }
 
 void gemma_tokenizer::print_token(std::vector<token_id> &input, u32 index) {
     std::string temp(tokens[input[index]]);
     remove_wunderline(temp);
     printf("%s", temp.c_str());
-    fflush(stdout);
 }
 
 token_id gemma_tokenizer::find_token_id(const std::string &token) {
