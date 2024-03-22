@@ -506,9 +506,11 @@ gemma_model::graph_build_kv_store(ggml_context *ctx, ggml_cgraph *graph, ggml_te
                                              (ggml_row_size(_kv_cache.k_layer[index_layer]->type, n_embd_k_gqa)) *
                                              kv_head);
 
+
     ggml_tensor *v_cache_view = ggml_view_2d(ctx, _kv_cache.v_layer[index_layer], n_tokens, n_embd_v_gqa,
                                              (n_ctx) * ggml_element_size(_kv_cache.v_layer[index_layer]),
                                              (kv_head) * ggml_element_size(_kv_cache.v_layer[index_layer]));
+
 
     ggml_build_forward_expand(graph, ggml_cpy(ctx, k_tensor, k_cache_view));
     ggml_build_forward_expand(graph, ggml_cpy(ctx, v_cur_t, v_cache_view));
@@ -703,7 +705,6 @@ ggml_cgraph *gemma_model::build_compute_graph(std::vector<token_id> &input, infe
                     DEFAULT_EXT_FACTOR, DEFAULT_ATTN_FACTOR, DEFAULT_BETA_FAST, DEFAULT_BETA_SLOW);
 
             Qcur = ggml_scale(compute_ctx, Qcur, 1.0f / sqrtf(float(_hyper_param.n_embed_heads)));
-
 
             Kcur = ggml_rope_custom(
                     compute_ctx, ggml_reshape_3d(compute_ctx, Kcur, _hyper_param.n_embed_heads, _hyper_param.n_head_kv,

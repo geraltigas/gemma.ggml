@@ -21,8 +21,15 @@ add_executable(run_tests test_main.cpp ${SOURCES})
 
 find_package(glog REQUIRED)
 find_package(GTest REQUIRED)
+# find opencl
+#find_package(OpenCL REQUIRED)
 # create a string to hold all lib
-set(LIBS ggml glog::glog GTest::GTest GTest::Main "libOpenCL.so.1.2")
+set(LIBS ggml glog::glog GTest::GTest GTest::Main
+#        "/opt/intel/oneapi/2024.0/lib/libimf.so"
+#        "/opt/intel/oneapi/2024.0/lib/libsvml.so"
+#        "/opt/intel/oneapi/2024.0/lib/libirng.so"
+#        "/opt/intel/oneapi/2024.0/lib/libintlc.so.5"
+)
 
 target_link_libraries(gemma_ggml ${LIBS})
 target_link_libraries(run_tests ${LIBS})

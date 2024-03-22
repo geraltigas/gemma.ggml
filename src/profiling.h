@@ -5,7 +5,7 @@
 #ifndef GEMMA_GGML_PROFILING_H
 #define GEMMA_GGML_PROFILING_H
 
-#define ENABLE_PROFILING 1
+#define ENABLE_PROFILING 0
 
 #ifdef __cplusplus
 extern "C" {
