@@ -30,7 +30,7 @@ int app::run(int argc, char* argv[])
 {
     CHECK_RT_MSG(init_glog(argc, argv), "Failed to init glog")
     init_profiling();
-//    CHECK_RT_MSG(init_opencl(), "Failed to init opencl")
+    CHECK_RT_MSG(init_opencl(), "Failed to init opencl")
     CHECK_RT_MSG(init_thread_pool(N_THREADS_MUL_MAT_CPU), "Failed to init ggml")
     const char * gguf_file_path = "../models/gemma-2b-it-q4_k_m.gguf";
     auto model = std::make_unique<gemma_model>();

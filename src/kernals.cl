@@ -37,108 +37,52 @@ __kernel void matrix_multiply(
     int start_row = get_global_id(0) * block;
     int start_col = get_global_id(1) * block;
 
+    if (start_row == 0 && start_col == 0) {
+        bool all_zero = true;
+        for (int i = 0; i< shared_edge_float * col_num; ++i) {
+            if ((*(__global float *)(src0 + i * 4)) != 0) {
+                all_zero = false;
+                break;
+            }
+        }
+        printf("ele num %d\n", shared_edge_float * col_num);
+        printf("all_zero %d\n", all_zero);
+    }
+
+    printf("start_row %d start_col %d\n", start_row, start_col);
+    printf("block %d\n", block);
+    printf("shared_edge_float %d\n", shared_edge_float);
+
     for (int row0_i = start_row; row0_i < start_row + block && row0_i < src0_row_num; ++row0_i) {
         for (int col1_i = start_col; col1_i < start_col + block && col1_i < col_num; ++col1_i) {
-            const int mat_i = col1_i / ne1; // index of matrix slice (col)
-            const int mat_col_i = col1_i % ne1; // index of col in matrix slice
+
+            printf("row0_i %d col1_i %d\n", row0_i, col1_i);
 
             __global const char *src0_row = src0 + row0_i * nb01;
             __global const char *src1_col = src1 + col1_i * row_size;
-            __global const char *dst_col = dst + (col1_i * nb1 + mat_i * nb2);
+            __global const char *dst_col = dst + col1_i * nb1;
+
+            printf("src0_row %p\n", src0_row);
+
+            float temp = 0;
+
+            int l = 0;
 
             for (int i = 0; i < shared_edge_float; ++i) {
-                ((__global float *)dst_col)[i] += (((__global float*)src0_row)[i]) * (((__global float*)src1_col)[i]);
+                temp += (*(__global float *)(src0_row + i * 4)) * (*(__global float *)(src1_col + i * 4));
+                if (l < 5) {
+                    printf("1: %f\n", (*(__global float *)(src0_row + i * 4)));
+                    printf("2: %f\n", (*(__global float *)(src1_col + i * 4)));
+                    l++;
+                }
+            }
+
+            printf("temp %f\n", temp);
+            printf("dst_col %f\n", (*(__global float *)dst_col));
+
+            if ((*(__global float *)dst_col) != temp) {
+                printf("Error at %d %d %f %f\n", row0_i, col1_i, (*(__global float *)dst_col), temp);
             }
         }
     }
-}
-
-inline void get_scale_min_k4(int j, const __global uint8_t *q, uint8_t *d, uint8_t *m)
-{
-    if (j < 4)
-    {
-        *d = q[j] & 63;
-        *m = q[j + 4] & 63;
-    }
-    else
-    {
-        *d = (q[j + 4] & 0xF) | ((q[j - 4] >> 6) << 4);
-        *m = (q[j + 4] >> 4) | ((q[j - 0] >> 6) << 4);
-    }
-}
-
-struct __attribute__((packed)) block_q4_K
-{
-    half d;
-    half dmin;
-    uint8_t scales[12];
-    uint8_t qs[128];
-};
-
-__kernel void dequantize_block_q4_K(__global const struct block_q4_K *x, __global float *yy)
-{
-    const int i = get_group_id(0);
-    printf("i: %d\n", i);
-    const int tid = get_local_id(0);
-    const int il = tid / 8;
-    const int ir = tid % 8;
-    const int is = 2 * il;
-    const int n = 4;
-
-    __global float *y = yy + get_group_id(0) * QK_K + 64 * il + n * ir;
-
-    const float dall = vload_half(0, &x[i].d);
-    const float dmin = vload_half(0, &x[i].dmin);
-
-    __global const uint8_t *q = x[i].qs + 32 * il + n * ir;
-
-    uint8_t sc, m;
-    get_scale_min_k4(is + 0, x[i].scales, &sc, &m);
-    float d1 = dall * sc;
-    float m1 = dmin * m;
-    get_scale_min_k4(is + 1, x[i].scales, &sc, &m);
-    float d2 = dall * sc;
-    float m2 = dmin * m;
-    for (int l = 0; l < n; ++l)
-    {
-        y[l + 0] = d1 * (q[l] & 0xF) - m1;
-        y[l + 32] = d2 * (q[l] >> 4) - m2;
-    }
-}
-
-struct __attribute__((packed)) block_q6_K
-{
-    uint8_t ql[128];
-    uint8_t qh[64];
-    int8_t scales[16];
-    half d;
-};
-
-__kernel void dequantize_block_q6_K(__global const struct block_q6_K *x, __global float *yy)
-{
-    const int i = get_group_id(0);
-    printf("i: %d\n", i);
-    const int tid = get_local_id(0);
-    const int ip = tid / 32;
-    const int il = tid - 32 * ip;
-    const int is = 8 * ip + il / 16;
-
-    __global float *y = yy + get_group_id(0) * QK_K + 128 * ip + il;
-
-    const float d = vload_half(0, &x[i].d);
-
-    __global const uint8_t *ql = x[i].ql + 64 * ip + il;
-    const uint8_t qh = x[i].qh[32 * ip + il];
-    __global const int8_t *sc = x[i].scales + is;
-
-    y[0] = d * sc[0] * ((int8_t)((ql[0] & 0xF) | (((qh >> 0) & 3) << 4)) - 32);
-    y[32] = d * sc[2] * ((int8_t)((ql[32] & 0xF) | (((qh >> 2) & 3) << 4)) - 32);
-    y[64] = d * sc[4] * ((int8_t)((ql[0] >> 4) | (((qh >> 4) & 3) << 4)) - 32);
-    y[96] = d * sc[6] * ((int8_t)((ql[32] >> 4) | (((qh >> 6) & 3) << 4)) - 32);
-}
-
-__kernel void convert_fp16_to_fp32(__global half* x, __global float* y) {
-    const uint i = get_global_id(0);
-
-    y[i] = vload_half(0, &x[i]);
 }

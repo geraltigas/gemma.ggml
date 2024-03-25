@@ -20,7 +20,7 @@
 #define N_THREADS_FOR_GGML 1
 #define N_THREADS_MUL_MAT_CPU 4
 #define CPU_SPLIT_RATIO 1
-#define MUL_MAT_BLOCK_SIZE 2
+#define MUL_MAT_BLOCK_SIZE 1
 #define COMPUTE_MID_NODE_DATA_BUFFER_SIZE (128u * 1024 * 1024)
 #define OPENCL_PLATFORM_NAME "Intel(R) OpenCL HD Graphics"
 #define OPENCL_DEVICE_NAME "Intel(R) UHD Graphics [0x9bc4]"
@@ -31,7 +31,7 @@
 #define SHOW 1
 #define HIDE 0
 
-#define CODE_MASK SHOW
+#define CODE_MASK HIDE
 
 #if CODE_MASK == SHOW
 #define MASK(code) code

@@ -25,9 +25,11 @@ void mul_mat(int64_t ne01, int64_t ne11, int64_t ne12,
              int64_t nb1, int64_t nb2,
              size_t row_size,
              int64_t shared_edge,
-             const char *wdata, const char *src0, const char *dst,
+             struct ggml_tensor *src0,struct ggml_tensor *src1,struct ggml_tensor *dst,
              ggml_vec_dot_t vec_dot,
-             enum ggml_type src0_type);
+             enum ggml_type src0_type,
+                     const char *wdata
+                     );
 
 #ifdef __cplusplus
 };

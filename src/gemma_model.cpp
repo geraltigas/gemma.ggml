@@ -11,6 +11,7 @@
 #include <cmath>
 #include <fstream>
 #include <chrono>
+#include "profiling.h"
 
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "ConstantParameter"
@@ -551,7 +552,6 @@ void gemma_model::begin_one_round_inference() {
     auto prefill_start = std::chrono::high_resolution_clock::now();
     inference(input, inference_stage::PREFILL);
     auto prefill_end = std::chrono::high_resolution_clock::now();
-
     if (input.size() <= size) {
         LOG(ERROR) << "inference failed";
     }
@@ -559,6 +559,7 @@ void gemma_model::begin_one_round_inference() {
     while (input[input.size() - 1] != _tokenizer.special_eos_id && input.size() < DEFAULT_TOKEN_NUM){
         _tokenizer.print_token(input, input.size() - 1);
         inference(input, inference_stage::DECODE);
+
     }
     auto decode_end = std::chrono::high_resolution_clock::now();
 
