@@ -23,8 +23,20 @@ find_package(glog REQUIRED)
 find_package(GTest REQUIRED)
 # find opencl
 find_package(OpenCL REQUIRED)
+
+find_path(GMP_INCLUDE_DIR NAMES gmp.h)
+find_library(GMP_LIBRARY NAMES gmp)
+find_library(GMPXX_LIBRARY NAMES gmpxx)
+if(GMP_INCLUDE_DIR AND GMP_LIBRARY AND GMPXX_LIBRARY)
+    message(STATUS "Found GMP: ${GMP_LIBRARY}, ${GMPXX_LIBRARY}")
+else()
+    message(FATAL_ERROR "Cannot find GMP")
+endif()
+
+target_include_directories(gemma_ggml PRIVATE ${GMP_INCLUDE_DIR})
+
 # create a string to hold all lib
-set(LIBS ggml glog::glog GTest::GTest GTest::Main OpenCL::OpenCL)
+set(LIBS ggml glog::glog GTest::GTest GTest::Main OpenCL::OpenCL ${GMP_LIBRARY} ${GMPXX_LIBRARY})
 #        "/opt/intel/oneapi/2024.0/lib/libimf.so"
 #        "/opt/intel/oneapi/2024.0/lib/libsvml.so"
 #        "/opt/intel/oneapi/2024.0/lib/libirng.so"
